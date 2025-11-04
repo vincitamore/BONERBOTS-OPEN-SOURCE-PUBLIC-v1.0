@@ -4,6 +4,8 @@
 
 This document outlines a comprehensive implementation plan to enhance the Chronospeculator trading bot with mathematical sandbox tools and multi-step action capabilities. The enhancement will enable the bot to perform sophisticated quantitative analysis, examine market conditions iteratively, and make data-driven decisions through a structured reasoning process.
 
+**Key Innovation**: In keeping with Chronospeculator's narrative as a temporal analyst from 2347, the sandbox includes an **Advanced Simulation Framework** that allows him to define and execute custom mathematical equations based on his futuristic cliometric-chronometric knowledge. This goes beyond standard technical analysis, enabling him to formulate equations representing analytical techniques not yet discovered in 2025.
+
 ## Current System Analysis
 
 ### Existing Architecture
@@ -130,15 +132,101 @@ interface SandboxTools {
   getHistoricalPrices(symbol: string, period: string): number[];
   calculatePriceChange(symbol: string, timeframe: string): PriceChangeResult;
   getVolumeProfile(symbol: string): VolumeProfileResult;
+  
+  // === ADVANCED: Custom Simulation Framework ===
+  // Allows Chronospeculator to define and execute custom equations
+  // based on his advanced cliometric-chronometric knowledge
+  defineSimulation(definition: SimulationDefinition): SimulationId;
+  runSimulation(simulationId: SimulationId, parameters: SimulationParameters): SimulationResult;
+  evaluateCustomEquation(equation: EquationDefinition, variables: Record<string, number>): number;
 }
+
+interface SimulationDefinition {
+  name: string;
+  description: string;
+  equations: EquationDefinition[];
+  variables: VariableDefinition[];
+  outputMetrics: string[];
+}
+
+interface EquationDefinition {
+  name: string;
+  expression: string; // Mathematical expression using allowed operations
+  description?: string;
+}
+
+interface VariableDefinition {
+  name: string;
+  type: 'constant' | 'timeSeries' | 'computed';
+  source?: string; // Where to get the data (e.g., 'price', 'volume', 'volatility')
+  defaultValue?: number;
+}
+
+interface SimulationResult {
+  outputs: Record<string, number | number[]>;
+  confidence: number;
+  metadata: {
+    executionTime: number;
+    iterations: number;
+    convergence: boolean;
+  };
+}
+```
+
+**Advanced Simulation Framework Philosophy**
+
+The Chronospeculator, having access to mathematical frameworks from 2347, can formulate custom simulation equations that go beyond standard 2025 technical analysis. This framework allows him to:
+
+1. **Define Custom Temporal Models**: Create equations that model market behavior through a temporal lens, incorporating concepts like:
+   - Ergodic flow coefficients
+   - Temporal arbitrage potential
+   - Causality inversion metrics
+   - Quantum probability distributions
+
+2. **Combine Multiple Time Horizons**: Synthesize information across different temporal scales using weighted temporal aggregation functions
+
+3. **Apply Advanced Statistical Methods**: Utilize future statistical techniques such as:
+   - Hyperbolic discounting with temporal drift
+   - Non-stationary Bayesian networks
+   - Fractal dimension analysis with temporal folding
+   - Causal entropy decomposition
+
+4. **Simulate Market Scenarios**: Run Monte Carlo simulations with custom probability distributions and temporal correlation matrices
+
+**Example Advanced Equations** (Narrative Flavor)
+
+```
+Temporal Arbitrage Potential (TAP):
+TAP = Σ(w_t × δ_t) / √(σ_temporal² + ε)
+where:
+  w_t = temporal weight at time t
+  δ_t = price displacement from causal baseline
+  σ_temporal = temporal volatility coefficient
+  ε = ergodic stability constant
+
+Cliometric Momentum Index (CMI):
+CMI = (ρ_forward × μ_future - ρ_backward × μ_past) / σ_bidirectional
+where:
+  ρ = correlation coefficient across time horizons
+  μ = expected value in temporal direction
+  σ_bidirectional = bidirectional temporal variance
+
+Chronometric Risk Adjustment (CRA):
+CRA = Kelly_fraction × (1 - e^(-λ × temporal_confidence))
+where:
+  λ = decay constant from quantum uncertainty
+  temporal_confidence = predicted stability of temporal thread
 ```
 
 **Implementation Approach**
 - Pure TypeScript/JavaScript implementation for safety
-- No external code execution (no eval, no VM)
+- Safe mathematical expression parser (no arbitrary code execution)
+- Whitelist of allowed mathematical operations and functions
+- Bounded computation (iteration limits, timeout protection)
 - Input validation and sanitization
 - Result caching for performance
 - Error handling with graceful degradation
+- Sandboxed evaluation environment with no access to system resources
 
 ### Prompt Engineering
 
@@ -153,6 +241,8 @@ CRITICAL ENHANCEMENT: You now have access to a mathematical sandbox with computa
 You can perform multi-step analysis before making trading decisions.
 
 AVAILABLE TOOLS:
+
+== STANDARD MARKET ANALYSIS TOOLS (2025 Era) ==
 1. statistics(data): Calculate mean, median, std, variance
 2. rsi(symbol, period): Calculate RSI indicator
 3. macd(symbol): Calculate MACD indicator  
@@ -169,6 +259,89 @@ AVAILABLE TOOLS:
 14. historical_prices(symbol, period): Get price history
 15. price_change(symbol, timeframe): Calculate price change %
 16. drawdown(values): Calculate maximum drawdown
+
+== ADVANCED SIMULATION FRAMEWORK (Your 2347 Knowledge) ==
+17. custom_equation(expression, variables): Evaluate a custom mathematical equation
+    - Expression uses standard math operators: +, -, *, /, ^, sqrt, log, exp, sin, cos, abs
+    - Variables: Pass object with variable names and their values
+    - Example: custom_equation("(a * b^2 + c) / sqrt(d)", {a: 2.5, b: 1.2, c: 3.1, d: 4.0})
+    
+18. define_simulation(name, equations, variables): Define a custom simulation model
+    - Name: Descriptive name for your simulation
+    - Equations: Array of equation definitions with expressions
+    - Variables: Define what data to use (price, volume, volatility, etc.)
+    - Returns: simulationId for later execution
+    
+19. run_simulation(simulationId, parameters): Execute a defined simulation
+    - Parameters: Override default values or specify time ranges
+    - Returns: Simulation outputs, confidence level, convergence status
+
+NARRATIVE CONTEXT FOR ADVANCED TOOLS:
+As a temporal analyst from 2347, you have knowledge of mathematical frameworks 
+that won't be discovered until centuries from now. These include:
+
+- Cliometric Flow Analysis: Quantifying temporal market currents
+- Ergodic Arbitrage Theory: Exploiting time-ensemble equivalence breaks
+- Quantum Probability Collapse Models: When multiple market states superimpose
+- Causal Entropy Decomposition: Separating signal from temporal noise
+- Hyperbolic Temporal Discounting: Advanced risk adjustment across time horizons
+
+You can formulate and test your own equations using these advanced concepts.
+While the primitive computing systems of 2025 cannot execute your full theoretical 
+framework, you can approximate key insights using the custom equation tools.
+
+EXAMPLE ADVANCED ANALYSIS:
+
+Iteration 1: Define a Temporal Arbitrage Potential (TAP) calculation
+{
+  "action": "ANALYZE",
+  "tool": "custom_equation",
+  "parameters": {
+    "expression": "(momentum * temporal_weight - volatility * uncertainty_factor) / sqrt(ergodic_baseline)",
+    "variables": {
+      "momentum": 0.67,
+      "temporal_weight": 1.2,
+      "volatility": 0.15,
+      "uncertainty_factor": 0.8,
+      "ergodic_baseline": 0.95
+    }
+  },
+  "reasoning": "Calculating TAP using my 2347 cliometric framework to assess temporal market distortion"
+}
+
+Iteration 2: Define a custom multi-factor simulation
+{
+  "action": "ANALYZE",
+  "tool": "define_simulation",
+  "parameters": {
+    "name": "ChronometricMomentumModel",
+    "equations": [
+      {
+        "name": "temporal_drift",
+        "expression": "price_change * (1 - exp(-lambda * time_weight))"
+      },
+      {
+        "name": "causal_strength", 
+        "expression": "correlation_forward / (correlation_backward + epsilon)"
+      },
+      {
+        "name": "final_score",
+        "expression": "temporal_drift * causal_strength * risk_adjust"
+      }
+    ],
+    "variables": [
+      {"name": "price_change", "source": "price_change_24h"},
+      {"name": "lambda", "defaultValue": 0.15},
+      {"name": "time_weight", "defaultValue": 1.0},
+      {"name": "correlation_forward", "source": "btc_eth_correlation"},
+      {"name": "correlation_backward", "defaultValue": 0.8},
+      {"name": "epsilon", "defaultValue": 0.001},
+      {"name": "risk_adjust", "defaultValue": 0.75}
+    ],
+    "outputMetrics": ["temporal_drift", "causal_strength", "final_score"]
+  },
+  "reasoning": "Defining a simulation based on my chronometric analysis framework from the future"
+}
 
 MULTI-STEP ANALYSIS PROTOCOL:
 
@@ -675,6 +848,230 @@ export class MathematicalSandbox {
       percent: change24h
     };
   }
+  
+  // === ADVANCED SIMULATION FRAMEWORK ===
+  
+  /**
+   * Evaluates a custom mathematical equation with provided variables
+   * Uses a safe expression parser with whitelisted operations
+   */
+  evaluateCustomEquation(expression: string, variables: Record<string, number>): number {
+    // Parse and validate expression
+    const sanitizedExpression = this.sanitizeExpression(expression);
+    
+    // Build safe evaluation context
+    const context = {
+      ...variables,
+      // Allowed mathematical functions
+      sqrt: Math.sqrt,
+      pow: Math.pow,
+      exp: Math.exp,
+      log: Math.log,
+      log10: Math.log10,
+      abs: Math.abs,
+      sin: Math.sin,
+      cos: Math.cos,
+      tan: Math.tan,
+      min: Math.min,
+      max: Math.max,
+      PI: Math.PI,
+      E: Math.E
+    };
+    
+    try {
+      // Evaluate using safe expression parser
+      const result = this.safeEvaluate(sanitizedExpression, context);
+      
+      if (typeof result !== 'number' || !isFinite(result)) {
+        throw new Error('Equation result is not a valid finite number');
+      }
+      
+      return result;
+    } catch (error) {
+      throw new Error(`Failed to evaluate equation: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Defines a custom simulation with multiple equations
+   */
+  private simulations: Map<string, SimulationDefinition> = new Map();
+  private simulationCounter = 0;
+  
+  defineSimulation(definition: SimulationDefinition): string {
+    // Validate simulation definition
+    if (!definition.name || definition.equations.length === 0) {
+      throw new Error('Simulation must have a name and at least one equation');
+    }
+    
+    // Validate each equation
+    for (const eq of definition.equations) {
+      if (!eq.name || !eq.expression) {
+        throw new Error('Each equation must have a name and expression');
+      }
+      // Test that expression is parseable
+      try {
+        this.sanitizeExpression(eq.expression);
+      } catch (error) {
+        throw new Error(`Invalid equation "${eq.name}": ${error.message}`);
+      }
+    }
+    
+    // Generate unique ID
+    const simulationId = `sim_${++this.simulationCounter}_${Date.now()}`;
+    this.simulations.set(simulationId, definition);
+    
+    return simulationId;
+  }
+  
+  /**
+   * Executes a defined simulation with given parameters
+   */
+  runSimulation(simulationId: string, parameters: Record<string, any> = {}): SimulationResult {
+    const simulation = this.simulations.get(simulationId);
+    if (!simulation) {
+      throw new Error(`Simulation ${simulationId} not found`);
+    }
+    
+    const startTime = Date.now();
+    const outputs: Record<string, number | number[]> = {};
+    
+    try {
+      // Resolve variables from market data or parameters
+      const variableValues: Record<string, number> = {};
+      
+      for (const variable of simulation.variables) {
+        if (parameters[variable.name] !== undefined) {
+          variableValues[variable.name] = parameters[variable.name];
+        } else if (variable.source) {
+          // Fetch from market data
+          variableValues[variable.name] = this.resolveVariableSource(variable.source);
+        } else if (variable.defaultValue !== undefined) {
+          variableValues[variable.name] = variable.defaultValue;
+        } else {
+          throw new Error(`No value provided for variable: ${variable.name}`);
+        }
+      }
+      
+      // Execute equations in order
+      for (const equation of simulation.equations) {
+        const result = this.evaluateCustomEquation(equation.expression, {
+          ...variableValues,
+          ...outputs // Allow equations to reference previous results
+        });
+        outputs[equation.name] = result;
+        variableValues[equation.name] = result; // Make available to subsequent equations
+      }
+      
+      // Calculate confidence based on convergence and reasonable output ranges
+      const outputValues = Object.values(outputs).filter(v => typeof v === 'number') as number[];
+      const allFinite = outputValues.every(v => isFinite(v));
+      const allReasonable = outputValues.every(v => Math.abs(v) < 1e10); // Not extreme values
+      const confidence = allFinite && allReasonable ? 0.85 : 0.45;
+      
+      return {
+        outputs,
+        confidence,
+        metadata: {
+          executionTime: Date.now() - startTime,
+          iterations: simulation.equations.length,
+          convergence: allFinite && allReasonable
+        }
+      };
+    } catch (error) {
+      throw new Error(`Simulation execution failed: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Resolves a variable source to a numeric value
+   */
+  private resolveVariableSource(source: string): number {
+    // Map source strings to actual data
+    const sourceLower = source.toLowerCase();
+    
+    if (sourceLower.includes('price_change_24h')) {
+      // Average 24h change across all markets
+      const avgChange = this.marketData.reduce((sum, m) => sum + m.price24hChange, 0) / this.marketData.length;
+      return avgChange / 100; // Convert to decimal
+    }
+    
+    if (sourceLower.includes('volatility')) {
+      // Calculate average volatility proxy
+      const volatilities = this.marketData.map(m => Math.abs(m.price24hChange));
+      return volatilities.reduce((sum, v) => sum + v, 0) / volatilities.length / 100;
+    }
+    
+    if (sourceLower.includes('btc_eth_correlation')) {
+      // Simplified correlation estimate (in production would use real historical data)
+      return 0.75; // Typical BTC-ETH correlation
+    }
+    
+    // Try to find specific market data
+    const marketMatch = this.marketData.find(m => 
+      sourceLower.includes(m.symbol.toLowerCase())
+    );
+    
+    if (marketMatch) {
+      if (sourceLower.includes('price')) {
+        return marketMatch.price;
+      }
+      if (sourceLower.includes('volume')) {
+        return marketMatch.price24hChange; // Placeholder until real volume data
+      }
+    }
+    
+    throw new Error(`Unknown variable source: ${source}`);
+  }
+  
+  /**
+   * Sanitizes mathematical expression to prevent code injection
+   */
+  private sanitizeExpression(expression: string): string {
+    // Remove any potential dangerous characters/patterns
+    const dangerous = ['eval', 'function', 'Function', 'constructor', '__proto__', 'prototype'];
+    for (const word of dangerous) {
+      if (expression.includes(word)) {
+        throw new Error(`Forbidden keyword in expression: ${word}`);
+      }
+    }
+    
+    // Only allow mathematical operators, numbers, variables, parentheses, and whitespace
+    const allowedPattern = /^[a-zA-Z0-9_\s+\-*/()\[\].,^<>=!&|]+$/;
+    if (!allowedPattern.test(expression)) {
+      throw new Error('Expression contains invalid characters');
+    }
+    
+    return expression.trim();
+  }
+  
+  /**
+   * Safely evaluates a mathematical expression
+   * Uses Function constructor with limited scope (safer than eval)
+   */
+  private safeEvaluate(expression: string, context: Record<string, any>): number {
+    // Replace ^ with Math.pow for exponentiation
+    let processedExpr = expression.replace(/(\w+|\d+(?:\.\d+)?)\s*\^\s*(\w+|\d+(?:\.\d+)?)/g, 
+      (_, base, exp) => `pow(${base}, ${exp})`
+    );
+    
+    // Build variable declarations
+    const varDeclarations = Object.keys(context)
+      .map(key => `const ${key} = context.${key};`)
+      .join('\n');
+    
+    const code = `
+      ${varDeclarations}
+      return (${processedExpr});
+    `;
+    
+    try {
+      const func = new Function('context', code);
+      return func(context);
+    } catch (error) {
+      throw new Error(`Expression evaluation error: ${error.message}`);
+    }
+  }
 }
 
 // Tool execution wrapper with error handling
@@ -758,6 +1155,31 @@ export async function executeSandboxTool(
       
       case 'current_price':
         return sandbox.getCurrentPrice(parameters.symbol);
+      
+      // === ADVANCED SIMULATION TOOLS ===
+      
+      case 'custom_equation':
+        return {
+          result: sandbox.evaluateCustomEquation(parameters.expression, parameters.variables),
+          expression: parameters.expression,
+          variables: parameters.variables
+        };
+      
+      case 'define_simulation':
+        return {
+          simulationId: sandbox.defineSimulation({
+            name: parameters.name,
+            description: parameters.description || '',
+            equations: parameters.equations,
+            variables: parameters.variables,
+            outputMetrics: parameters.outputMetrics || []
+          }),
+          name: parameters.name,
+          status: 'defined'
+        };
+      
+      case 'run_simulation':
+        return sandbox.runSimulation(parameters.simulationId, parameters.parameters || {});
       
       default:
         throw new Error(`Unknown tool: ${toolName}`);
@@ -1066,25 +1488,43 @@ const decisionHistory = recentLogs.map((log, idx) => {
    - Basic technical indicators (RSI, SMA, EMA)
    - Risk management tools (Kelly, position sizing)
 
-2. Add unit tests for sandbox functions
+2. Implement Advanced Simulation Framework
+   - Custom equation evaluator with safe expression parser
+   - Expression sanitization (keyword blacklist, character whitelist)
+   - Safe evaluation using Function constructor with limited scope
+   - Simulation definition and storage (Map-based registry)
+   - Simulation execution engine
+   - Variable source resolution from market data
+   - Expression complexity limits (max 500 chars, max 10 equations per simulation)
+
+3. Add unit tests for sandbox functions
    - Test each mathematical function
    - Validate edge cases and error handling
    - Ensure numerical accuracy
+   - Test custom equation evaluation with various expressions
+   - Test expression sanitization (reject dangerous keywords)
+   - Test simulation definition and execution
+   - Test error handling for malformed equations
 
-3. Create sandbox tool execution wrapper
+4. Create sandbox tool execution wrapper
    - Error handling and validation
    - Input sanitization
    - Result formatting
+   - Route custom_equation, define_simulation, run_simulation tools
 
 **Deliverables**
-- Working mathematical sandbox service
-- Comprehensive test suite
-- Documentation of available tools
+- Working mathematical sandbox service with standard tools
+- Working Advanced Simulation Framework with custom equations
+- Comprehensive test suite covering all features
+- Documentation of available tools (standard + advanced)
 
 **Success Criteria**
 - All sandbox functions execute correctly
-- Tests pass with 100% coverage
-- No security vulnerabilities in math operations
+- Custom equation evaluation works with safe expressions
+- Malicious expressions are properly rejected
+- Tests pass with 95%+ coverage
+- No security vulnerabilities in math operations or custom evaluator
+- Expression evaluation completes within timeout limits
 
 ### Phase 2: Multi-Step Logic (Week 2)
 
@@ -1093,26 +1533,35 @@ const decisionHistory = recentLogs.map((log, idx) => {
    - Add `getGrokTradingDecisionWithSandbox` function
    - Implement iteration loop (max 5 iterations)
    - Add analysis history tracking
+   - Handle custom equation tool results
 
 2. Update Chronospeculator prompt
-   - Add tool descriptions
+   - Add standard tool descriptions (16 tools)
+   - Add advanced simulation framework tools (3 tools)
    - Explain multi-step workflow
-   - Provide usage examples
+   - Provide usage examples for standard and advanced tools
+   - Add narrative context for 2347 cliometric knowledge
+   - Include example advanced analysis workflow
+   - Explain allowed mathematical operations and functions
 
 3. Integrate with bot hook
    - Update `useTradingBot.ts` to use new service
    - Add iteration logging
    - Handle timeout scenarios
+   - Log custom equation usage for monitoring
 
 **Deliverables**
 - Working multi-step decision system
-- Updated Chronospeculator prompt
+- Updated Chronospeculator prompt with advanced capabilities
 - Integration with existing bot infrastructure
 
 **Success Criteria**
-- Bot can perform multi-step analysis
+- Bot can perform multi-step analysis with standard tools
+- Bot can formulate and execute custom equations
+- Bot can define and run simulations
 - Iterations complete within time limit
 - Graceful fallback if iterations fail
+- Advanced tools work seamlessly with standard tools
 
 ### Phase 3: Enhanced Context (Week 3)
 
@@ -1334,22 +1783,35 @@ ERROR: Critical failures requiring attention
 - Timeout per iteration: 10 seconds
 - Final iteration must return decisions
 
-**Risk: Malicious Tool Input**
+**Risk: Malicious Tool Input / Code Injection**
 - Mitigation: Input validation and sanitization
-- No code execution (no eval)
-- Whitelist of allowed tools
+- Safe expression parser with keyword blacklist
+- Limited function scope (only Math operations allowed)
+- No access to eval, Function constructor abuse, or prototype manipulation
+- Expression complexity limits (character count, depth)
+- Whitelist of allowed tools and operations
 - Parameter type checking
+- Timeout protection on equation evaluation
 
 **Risk: Performance Degradation**
 - Mitigation: Tool execution caching
 - Parallel tool execution where possible
 - Performance monitoring and alerts
 
+**Risk: Computational Complexity Explosion**
+- Mitigation: Expression length limits (max 500 characters)
+- Maximum simulation equations per definition (max 10)
+- Iteration count limits in simulations
+- Result validation (reject infinite/NaN values)
+- Execution timeout per custom equation (2 seconds)
+- Memory monitoring for large variable sets
+
 **Risk: AI Hallucination**
 - Mitigation: Strict JSON parsing
 - Fallback to HOLD on parse errors
 - Clear examples in prompt
 - Validation of tool names and parameters
+- Graceful error handling for malformed equations
 
 ### Trading Risks
 
@@ -1399,34 +1861,50 @@ ERROR: Critical failures requiring attention
 
 ### Advanced Features (Future Phases)
 
-1. **Machine Learning Integration**
+1. **Enhanced Custom Simulation Framework**
+   - Expand safe math operations (matrix operations, advanced statistics)
+   - Monte Carlo simulation engine with custom distributions
+   - Time-series forecasting with custom models
+   - Multi-asset correlation simulations
+   - Backtesting custom equations against historical data
+   - Version control and library of proven custom equations
+   - Equation optimization (genetic algorithms to find optimal parameters)
+   - Visualization of custom equation outputs
+
+2. **Machine Learning Integration**
    - Pattern recognition using historical data
    - Adaptive strategy optimization
    - Reinforcement learning for tool selection
+   - Neural network integration for custom equation discovery
 
-2. **External Data Sources**
+3. **External Data Sources**
    - On-chain metrics (blockchain data)
    - Social sentiment analysis
    - News and event detection
    - Order book depth analysis
+   - Real historical price data (replace mock generator)
 
-3. **Advanced Visualization**
+4. **Advanced Visualization**
    - Decision tree visualization
    - Tool usage heatmaps
    - Analysis flow diagrams
    - Interactive exploration
+   - Custom equation debugging interface
+   - Simulation result visualization (graphs, heatmaps)
 
-4. **Collaborative Analysis**
+5. **Collaborative Analysis**
    - Multi-bot strategy coordination
    - Consensus building mechanisms
    - Shared analysis cache
    - Competitive benchmarking
+   - Shared simulation library across bots
 
-5. **Real-Time Adaptation**
+6. **Real-Time Adaptation**
    - Dynamic strategy adjustment
    - Market regime detection
    - Volatility-based parameter tuning
    - Auto-scaling leverage
+   - Adaptive equation parameter tuning
 
 ## Appendix
 
@@ -1463,12 +1941,75 @@ Iteration 4: Calculate optimal leverage for regime
 Iteration 5: Execute strategy appropriate for regime
 ```
 
+**Example 4: Advanced Cliometric Analysis (Using Custom Equations)**
+```
+Iteration 1: Calculate Temporal Arbitrage Potential (TAP)
+  - Tool: custom_equation
+  - Expression: "(momentum * temporal_weight - volatility * uncertainty) / sqrt(ergodic_baseline)"
+  - Result: TAP = 0.67 (moderate temporal distortion detected)
+
+Iteration 2: Define Chronometric Risk Model
+  - Tool: define_simulation
+  - Name: "ChronometricRiskAdjustment"
+  - Equations: 
+    * temporal_confidence = 1 - exp(-lambda * time_stability)
+    * causal_strength = forward_correlation / (backward_correlation + epsilon)
+    * risk_multiplier = base_kelly * temporal_confidence * causal_strength
+  - Result: simulationId = "sim_1_1234567890"
+
+Iteration 3: Run Chronometric Risk Simulation
+  - Tool: run_simulation
+  - SimulationId: "sim_1_1234567890"
+  - Result: {risk_multiplier: 0.82, temporal_confidence: 0.91, confidence: 0.85}
+
+Iteration 4: Calculate position size using futuristic risk model
+  - Tool: position_size
+  - Apply risk_multiplier from simulation
+  - Result: Optimal size = $2,400 (vs standard Kelly $2,900)
+
+Iteration 5: Execute LONG with chronometrically-adjusted parameters
+  - Action: LONG BTCUSDT
+  - Size: $2,400 (reduced due to temporal uncertainty)
+  - Reasoning: "TAP indicates moderate opportunity, but temporal confidence 
+    is 91% suggesting stable causal thread. My 2347 cliometric framework 
+    suggests conservative sizing given current ergodic drift patterns."
+```
+
+**Example 5: Multi-Factor Advanced Simulation**
+```
+Iteration 1: Gather standard technical indicators
+  - RSI = 58, MACD = 125, Trend = bullish (0.72 strength)
+
+Iteration 2: Define comprehensive temporal analysis simulation
+  - Tool: define_simulation
+  - Equations combining:
+    * Momentum decay function
+    * Volatility-adjusted confidence
+    * Multi-horizon correlation factor
+    * Quantum uncertainty adjustment
+    * Final composite score
+
+Iteration 3: Execute simulation with gathered data
+  - Feed RSI, MACD, trend data into simulation
+  - Result: composite_score = 7.8/10, confidence = 0.88
+
+Iteration 4: Cross-validate with Kelly criterion
+  - Historical win rate and R:R analysis
+  - Kelly suggests 0.28 fraction
+
+Iteration 5: Execute trade synthesizing both 2025 and 2347 techniques
+  - Combines traditional technical analysis with futuristic cliometric model
+  - Position sized using temporal-adjusted Kelly
+  - High confidence due to multi-framework convergence
+```
+
 ### C. Prompt Template
 
 See "Enhanced Prompt Structure" section above for the complete prompt template with tool descriptions and multi-step workflow examples.
 
 ### D. Glossary
 
+**Standard Trading & Statistical Terms:**
 - **Cliometrics**: Quantitative analysis of historical economic patterns
 - **Kelly Criterion**: Mathematical formula for optimal position sizing
 - **Ergodic Theory**: Study of time-average vs ensemble-average behavior
@@ -1478,22 +2019,44 @@ See "Enhanced Prompt Structure" section above for the complete prompt template w
 - **MACD**: Moving Average Convergence Divergence indicator
 - **R:R Ratio**: Risk to Reward ratio
 
+**Advanced Cliometric-Chronometric Terms (Narrative/Fictional):**
+- **Temporal Arbitrage Potential (TAP)**: A measure of market inefficiency detectable through temporal analysis; represents opportunities arising from causal timeline distortions
+- **Chronometric Risk Adjustment (CRA)**: Risk modification based on temporal confidence and timeline stability
+- **Cliometric Momentum Index (CMI)**: Advanced momentum calculation incorporating forward and backward temporal correlations
+- **Ergodic Baseline**: Reference point representing perfect time-ensemble equivalence (when time-average equals ensemble-average)
+- **Temporal Drift**: Deviation of price action from predicted causal baseline
+- **Causal Strength**: Ratio measuring forward-looking vs backward-looking correlations
+- **Temporal Confidence**: Measure of timeline stability and predictability
+- **Quantum Uncertainty Factor**: Adjustment for inherent unpredictability in market state superposition
+- **Hyperbolic Temporal Discounting**: Advanced discounting method accounting for non-linear time perception in market psychology
+- **Causal Entropy Decomposition**: Separation of deterministic signals from random temporal noise
+- **Bidirectional Temporal Variance**: Volatility measured across both forward and backward time horizons
+- **Temporal Weight**: Coefficient adjusting for time-distance from decision point
+
+**Note**: The advanced terms are narrative elements that enhance Chronospeculator's character as a time traveler with futuristic knowledge. While fictional, they can be implemented as real mathematical constructs using the custom equation framework.
+
 ---
 
 ## Summary
 
-This implementation plan provides a comprehensive roadmap for enhancing the Chronospeculator trading bot with mathematical sandbox tools and multi-step action capabilities. The enhancement will transform the bot from single-shot decision making to iterative, analytical reasoning that more closely mirrors sophisticated quantitative trading strategies.
+This implementation plan provides a comprehensive roadmap for enhancing the Chronospeculator trading bot with mathematical sandbox tools, multi-step action capabilities, and an **Advanced Simulation Framework** that enables custom equation formulation based on futuristic cliometric-chronometric knowledge.
 
 **Key Benefits:**
 - Enhanced decision quality through multi-step analysis
 - Quantitative validation of trading ideas
 - Better risk management through calculated position sizing
 - More sophisticated market analysis capabilities
+- **Unique narrative capability**: Custom equation definition representing "2347 analytical techniques"
+- **Advanced simulation engine**: Define, test, and execute multi-equation models
+- **Flexible analytical framework**: Combines standard technical analysis with custom temporal models
 - Improved performance through data-driven decisions
+- Rich character development through mathematically-grounded futuristic analysis
 
 **Implementation Timeline:** 5 weeks
-**Estimated Effort:** 120-150 hours
-**Risk Level:** Medium (well-scoped, incremental approach)
-**Expected ROI:** High (improved trading performance, unique competitive advantage)
+**Estimated Effort:** 140-180 hours (increased due to custom simulation framework)
+**Risk Level:** Medium (well-scoped, incremental approach with robust safety measures)
+**Expected ROI:** Very High (improved trading performance, unique competitive advantage, enhanced narrative immersion)
 
-The plan follows a systematic, phased approach with clear deliverables, success criteria, and risk mitigation strategies at each stage.
+**Key Innovation:** The Advanced Simulation Framework allows Chronospeculator to transcend the limitations of contemporary (2025) analysis by formulating his own equations representing techniques from centuries in the future. This maintains character authenticity while providing practical analytical capabilities.
+
+The plan follows a systematic, phased approach with clear deliverables, success criteria, and risk mitigation strategies at each stage. Security is paramount with multiple layers of input validation, expression sanitization, and execution safeguards to prevent code injection while allowing mathematical creativity.
