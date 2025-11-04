@@ -724,7 +724,156 @@ const useTradingBots = (isGloballyPaused: boolean) => {
     };
 
     const manualClosePosition = async (botId: string, positionId: string) => {
-        // ... (existing manual close logic)
+        console.log(`🖐️ Manual close requested for position ${positionId} on bot ${botId}`);
+        
+        const bot = bots.find(b => b.id === botId);
+        if (!bot) {
+            console.error(`Bot ${botId} not found`);
+            return;
+        }
+
+        const posToClose = bot.portfolio.positions.find(p => p.id === positionId);
+        if (!posToClose) {
+            console.error(`Position ${positionId} not found in bot ${botId}`);
+            alert('Position not found. It may have already been closed.');
+            return;
+        }
+
+        const market = markets.find(m => m.symbol === posToClose.symbol);
+        if (!market) {
+            console.error(`Market data not found for ${posToClose.symbol}`);
+            alert('Cannot close position: Market data not available.');
+            return;
+        }
+
+        try {
+            if (bot.tradingMode === 'real') {
+                // Real trading: Place market order on exchange
+                console.log(`📤 Placing real market order to close ${posToClose.symbol} position`);
+                const rawQuantity = Math.abs((posToClose.size * posToClose.leverage) / posToClose.entryPrice);
+                const quantity = getAdjustedQuantity(posToClose.symbol, rawQuantity);
+
+                if (quantity <= 0) {
+                    console.error('Calculated quantity is 0');
+                    alert('Cannot close position: Invalid quantity calculated.');
+                    return;
+                }
+
+                await placeRealOrder({
+                    symbol: posToClose.symbol,
+                    side: posToClose.type === OrderType.LONG ? 'SELL' : 'BUY',
+                    type: 'MARKET',
+                    quantity,
+                    reduceOnly: 'true',
+                }, bot.id);
+
+                console.log(`✅ Real position closed on exchange`);
+                
+                // Update bot state - remove position and set cooldown
+                setBots(current => current.map(b => {
+                    if (b.id === botId) {
+                        return {
+                            ...b,
+                            portfolio: {
+                                ...b.portfolio,
+                                positions: b.portfolio.positions.filter(p => p.id !== positionId)
+                            },
+                            symbolCooldowns: {
+                                ...b.symbolCooldowns,
+                                [posToClose.symbol]: Date.now() + SYMBOL_COOLDOWN_MS
+                            }
+                        };
+                    }
+                    return b;
+                }));
+
+                alert(`Position closed successfully on exchange. ${posToClose.symbol} is now on cooldown.`);
+
+            } else {
+                // Paper trading: Calculate PnL and update local state
+                console.log(`📝 Closing paper position for ${posToClose.symbol}`);
+                
+                // Calculate quantity based on size, leverage, and entry price
+                const assetQuantity = (posToClose.size * posToClose.leverage) / posToClose.entryPrice;
+                
+                // Calculate PnL based on price movement and quantity
+                const unrealizedPnl = posToClose.type === OrderType.LONG
+                    ? (market.price - posToClose.entryPrice) * assetQuantity
+                    : (posToClose.entryPrice - market.price) * assetQuantity;
+                
+                const exitFee = posToClose.size * 0.03; // 3% fee on exit
+                const netPnl = unrealizedPnl - exitFee;
+                
+                // Create order record for history
+                const exitOrder: Order = {
+                    id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+                    symbol: posToClose.symbol,
+                    type: posToClose.type,
+                    size: posToClose.size,
+                    leverage: posToClose.leverage,
+                    pnl: netPnl,
+                    fee: exitFee,
+                    timestamp: Date.now(),
+                    entryPrice: posToClose.entryPrice,
+                    exitPrice: market.price,
+                };
+
+                // Update bot state
+                setBots(current => current.map(b => {
+                    if (b.id === botId) {
+                        const newBalance = b.portfolio.balance + posToClose.size + netPnl;
+                        const newRealizedPnl = (b.realizedPnl || 0) + netPnl;
+                        
+                        // Update win rate if profitable
+                        let newWinRate = b.winRate || 0;
+                        if (netPnl > 0 && b.tradeCount > 0) {
+                            const wins = b.tradeCount * (b.winRate || 0);
+                            newWinRate = (wins + 1) / b.tradeCount;
+                        }
+
+                        return {
+                            ...b,
+                            portfolio: {
+                                ...b.portfolio,
+                                balance: newBalance,
+                                totalValue: newBalance + b.portfolio.pnl, // Will be recalculated on next update
+                                positions: b.portfolio.positions.filter(p => p.id !== positionId)
+                            },
+                            orders: [exitOrder, ...(b.orders || [])],
+                            realizedPnl: newRealizedPnl,
+                            winRate: newWinRate,
+                            symbolCooldowns: {
+                                ...b.symbolCooldowns,
+                                [posToClose.symbol]: Date.now() + SYMBOL_COOLDOWN_MS
+                            },
+                            botLogs: [{
+                                timestamp: Date.now(),
+                                decisions: [],
+                                prompt: '',
+                                notes: [`MANUAL CLOSE: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`]
+                            }, ...(b.botLogs || [])]
+                        };
+                    }
+                    return b;
+                }));
+
+                console.log(`✅ Paper position closed. PnL: $${netPnl.toFixed(2)}`);
+                alert(`Position closed successfully!\nPnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})\n${posToClose.symbol} is now on cooldown.`);
+            }
+
+            // Trigger portfolio update to refresh all data
+            if (botFunctionsRef.current.updatePortfolios) {
+                await botFunctionsRef.current.updatePortfolios();
+            }
+
+        } catch (error: any) {
+            console.error('❌ Error manually closing position:', error);
+            if (error.message && error.message.includes('ReduceOnly Order is rejected')) {
+                alert('Position no longer exists on the exchange. It may have been auto-closed by stop-loss or liquidation.');
+            } else {
+                alert(`Failed to close position: ${error.message || 'Unknown error'}`);
+            }
+        }
     };
 
     return { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause: () => {}, forceProcessTurn: () => {}, initialBalanceRef };
