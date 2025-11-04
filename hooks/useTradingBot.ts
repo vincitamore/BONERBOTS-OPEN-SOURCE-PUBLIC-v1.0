@@ -118,7 +118,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
 
     const botFunctionsRef = useRef<{
         updatePortfolios: () => Promise<Market[]>;
-        runTradingTurn: (providedMarkets?: Market[]) => Promise<void>;
+        runTradingTurn: (providedMarkets?: Market[], specificBotId?: string) => Promise<void>;
     }>({
         updatePortfolios: async () => [],
         runTradingTurn: async () => {}
@@ -303,8 +303,8 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             return marketData; // Return the market data so it can be used immediately
         };
 
-        botFunctionsRef.current.runTradingTurn = async (providedMarkets?: Market[]) => {
-            console.log('🎲 Running trading turn for all active bots...');
+        botFunctionsRef.current.runTradingTurn = async (providedMarkets?: Market[], specificBotId?: string) => {
+            console.log(specificBotId ? `🎲 Running trading turn for bot: ${specificBotId}...` : '🎲 Running trading turn for all active bots...');
             
             // Use provided markets or fall back to state
             const activeMarkets = providedMarkets || markets;
@@ -316,10 +316,13 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             }
             
             console.log(`   📊 Available markets: ${activeMarkets.length}`, activeMarkets.map(m => m.symbol));
-            const activeBots = bots.filter(b => !b.isPaused);
-            console.log(`   Active bots: ${activeBots.length} / ${bots.length}`);
             
-            for (const bot of bots) {
+            // Filter to specific bot if requested, otherwise process all
+            const botsToProcess = specificBotId ? bots.filter(b => b.id === specificBotId) : bots;
+            const activeBots = botsToProcess.filter(b => !b.isPaused);
+            console.log(`   Active bots: ${activeBots.length} / ${botsToProcess.length}`);
+            
+            for (const bot of botsToProcess) {
                 if (bot.isPaused) {
                     console.log(`   ⏭️ Skipping ${bot.name} - paused`);
                     continue;
@@ -896,7 +899,8 @@ const useTradingBots = (isGloballyPaused: boolean) => {
 
     const forceProcessTurn = async (botId?: string) => {
         if (botFunctionsRef.current.runTradingTurn) {
-            await botFunctionsRef.current.runTradingTurn();
+            // If botId is provided, force turn for just that bot; otherwise for all bots
+            await botFunctionsRef.current.runTradingTurn(undefined, botId);
         }
     };
 
