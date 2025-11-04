@@ -313,6 +313,16 @@ export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('Provider creation failed:', errorData);
+        
+        // Format validation errors for display
+        if (errorData.details && Array.isArray(errorData.details)) {
+          const validationErrors = errorData.details
+            .map((d: any) => `${d.field}: ${d.message}`)
+            .join(', ');
+          throw new Error(`Validation failed: ${validationErrors}`);
+        }
+        
         throw new Error(errorData.error || 'Failed to create provider');
       }
       const newProvider = await response.json();
@@ -337,6 +347,16 @@ export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('Provider update failed:', errorData);
+        
+        // Format validation errors for display
+        if (errorData.details && Array.isArray(errorData.details)) {
+          const validationErrors = errorData.details
+            .map((d: any) => `${d.field}: ${d.message}`)
+            .join(', ');
+          throw new Error(`Validation failed: ${validationErrors}`);
+        }
+        
         throw new Error(errorData.error || 'Failed to update provider');
       }
       const updatedProvider = await response.json();

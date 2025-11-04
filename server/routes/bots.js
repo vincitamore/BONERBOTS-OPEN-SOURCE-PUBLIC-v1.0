@@ -279,13 +279,22 @@ router.post('/:id/reset',
         return res.status(400).json({ error: 'Cannot reset a bot that is trading with real funds' });
       }
       
-      // Close all open positions
-      const positions = db.getPositions(req.params.id, 'open');
-      for (const position of positions) {
-        db.closePosition(position.id);
-      }
+      // Delete all bot data
+      console.log(`Resetting bot ${req.params.id} - clearing all data...`);
       
-      // Create initial snapshot with reset balance
+      // 1. Delete all positions (open and closed)
+      db.db.prepare('DELETE FROM positions WHERE bot_id = ?').run(req.params.id);
+      
+      // 2. Delete all trades
+      db.db.prepare('DELETE FROM trades WHERE bot_id = ?').run(req.params.id);
+      
+      // 3. Delete all bot decisions (AI logs)
+      db.db.prepare('DELETE FROM bot_decisions WHERE bot_id = ?').run(req.params.id);
+      
+      // 4. Delete all old state snapshots
+      db.db.prepare('DELETE FROM bot_state_snapshots WHERE bot_id = ?').run(req.params.id);
+      
+      // 5. Create fresh initial snapshot with reset balance
       const settings = db.getSettings();
       const initialBalance = settings.paper_bot_initial_balance || 10000;
       
@@ -300,6 +309,14 @@ router.post('/:id/reset',
         timestamp: new Date().toISOString()
       });
       
+      // 6. Clear the ENTIRE arena_state so all bots reload fresh from database
+      try {
+        db.db.prepare('DELETE FROM arena_state').run();
+        console.log('Cleared entire arena_state - all bots will reload fresh from database');
+      } catch (err) {
+        console.log('Note: Could not clear arena_state:', err.message);
+      }
+      
       // Create audit log
       createAuditLog({
         event_type: 'bot_reset',
@@ -310,6 +327,7 @@ router.post('/:id/reset',
         ip_address: req.ip
       });
       
+      console.log(`✅ Bot ${req.params.id} reset successfully`);
       res.json({ success: true, message: 'Bot reset successfully', initial_balance: initialBalance });
     } catch (error) {
       console.error('Error resetting bot:', error);

@@ -63,15 +63,44 @@ app.post('/api/gemini', async (req, res) => {
       return res.status(400).json({ error: 'Missing prompt in request body' });
     }
     
-    if (!config.geminiApiKey) {
+    // Get Gemini API key from database (llm_providers table) or fallback to env var
+    const Database = require('better-sqlite3');
+    const { decrypt } = require('./utils/encryption');
+    const path = require('path');
+    
+    const dbPath = path.join(__dirname, '..', 'data', 'arena.db');
+    const db = new Database(dbPath);
+    
+    let apiKey = null;
+    
+    try {
+      // Try to get API key from database
+      const provider = db.prepare(`
+        SELECT api_key_encrypted 
+        FROM llm_providers 
+        WHERE provider_type = 'gemini' AND is_active = 1
+        LIMIT 1
+      `).get();
+      
+      if (provider && provider.api_key_encrypted) {
+        apiKey = decrypt(provider.api_key_encrypted);
+      } else {
+        // Fallback to environment variable
+        apiKey = config.geminiApiKey;
+      }
+    } finally {
+      db.close();
+    }
+    
+    if (!apiKey) {
       return res.status(503).json({ 
         error: 'Gemini API key not configured',
-        message: 'Please configure GEMINI_API_KEY in server/.env or via /config/providers'
+        message: 'Please configure a Gemini provider via /config/providers'
       });
     }
     
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: 'application/json' }
@@ -99,10 +128,39 @@ app.post('/api/gemini', async (req, res) => {
  */
 app.post('/api/grok', async (req, res) => {
   try {
-    if (!config.xaiApiKey) {
+    // Get Grok API key from database (llm_providers table) or fallback to env var
+    const Database = require('better-sqlite3');
+    const { decrypt } = require('./utils/encryption');
+    const path = require('path');
+    
+    const dbPath = path.join(__dirname, '..', 'data', 'arena.db');
+    const db = new Database(dbPath);
+    
+    let apiKey = null;
+    
+    try {
+      // Try to get API key from database
+      const provider = db.prepare(`
+        SELECT api_key_encrypted 
+        FROM llm_providers 
+        WHERE provider_type = 'grok' AND is_active = 1
+        LIMIT 1
+      `).get();
+      
+      if (provider && provider.api_key_encrypted) {
+        apiKey = decrypt(provider.api_key_encrypted);
+      } else {
+        // Fallback to environment variable
+        apiKey = config.xaiApiKey;
+      }
+    } finally {
+      db.close();
+    }
+    
+    if (!apiKey) {
       return res.status(503).json({ 
         error: 'Grok API key not configured',
-        message: 'Please configure XAI_API_KEY in server/.env or via /config/providers'
+        message: 'Please configure a Grok provider via /config/providers'
       });
     }
     
@@ -112,7 +170,7 @@ app.post('/api/grok', async (req, res) => {
       {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.xaiApiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         timeout: 30000
       }
@@ -154,11 +212,21 @@ app.get('/api/asterdex/exchangeInfo', async (req, res) => {
  */
 app.get('/api/asterdex', async (req, res) => {
   try {
-    // Use any valid API key for public endpoints (or default to first available wallet)
-    const { apiKey } = await config.getApiKeysForBot('bot_degen');
+    // Market data is public - no API key required
+    // Try to get API key if available, but don't fail if not found
+    let headers = {};
+    try {
+      const { apiKey } = await config.getApiKeysForBot('bot_degen');
+      if (apiKey) {
+        headers = { 'X-MBX-APIKEY': apiKey };
+      }
+    } catch (err) {
+      // No API key configured - that's OK for public market data
+      console.log('No API key found for market data, using public endpoint');
+    }
     
     const response = await axios.get('https://fapi.asterdex.com/fapi/v1/ticker/24hr', {
-      headers: { 'X-MBX-APIKEY': apiKey },
+      headers,
       timeout: 10000
     });
     
@@ -263,6 +331,28 @@ app.post('/api/state', async (req, res) => {
   } catch (error) {
     console.error('Error updating state:', error);
     res.status(500).json({ error: 'Error updating arena state' });
+  }
+});
+
+/**
+ * DELETE /api/state - Clear arena state
+ */
+app.delete('/api/state', async (req, res) => {
+  try {
+    // Clear the arena_state table
+    const Database = require('better-sqlite3');
+    const dbPath = path.join(__dirname, '..', 'data', 'arena.db');
+    const db = new Database(dbPath);
+    
+    db.prepare('DELETE FROM arena_state').run();
+    db.close();
+    
+    console.log('✅ Arena state cleared');
+    res.json({ success: true, message: 'Arena state cleared' });
+    
+  } catch (error) {
+    console.error('Error clearing state:', error);
+    res.status(500).json({ error: 'Error clearing arena state' });
   }
 });
 

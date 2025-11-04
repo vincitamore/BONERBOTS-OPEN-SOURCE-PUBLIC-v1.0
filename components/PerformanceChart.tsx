@@ -67,6 +67,7 @@ const PerformanceChart: React.FC<ArenaPerformanceChartProps> = ({ series, initia
     // Sync series data
     series.forEach(s => {
       const formattedData: LineData<Time>[] = s.data
+        .filter(d => d.value != null && typeof d.value === 'number') // Filter out null/undefined values
         .map(d => ({
           time: (d.timestamp / 1000) as Time,
           value: d.value,

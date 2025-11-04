@@ -135,9 +135,13 @@ export const ProvidersPage: React.FC = () => {
         provider_type: formData.provider_type,
         api_endpoint: formData.api_endpoint,
         model_name: formData.model_name || null,
-        config_json: formData.config_json || null,
         is_active: formData.is_active,
       };
+
+      // Only include config_json if it's not empty
+      if (formData.config_json && formData.config_json.trim()) {
+        providerData.config_json = formData.config_json;
+      }
 
       // Only include API key if it's been entered
       if (formData.api_key) {

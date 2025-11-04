@@ -91,7 +91,14 @@ router.post('/',
   requireRole('admin'),
   body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Name must be 1-100 characters'),
   body('provider_type').isIn(['openai', 'anthropic', 'gemini', 'grok', 'local', 'custom']).withMessage('Invalid provider type'),
-  body('api_endpoint').trim().isURL().withMessage('API endpoint must be a valid URL'),
+  body('api_endpoint').trim().isLength({ min: 1 }).withMessage('API endpoint is required')
+    .custom((value) => {
+      // More lenient URL validation - just check it starts with http:// or https://
+      if (!value.startsWith('http://') && !value.startsWith('https://')) {
+        throw new Error('API endpoint must start with http:// or https://');
+      }
+      return true;
+    }),
   body('model_name').optional().trim().isLength({ max: 100 }).withMessage('Model name max 100 characters'),
   body('api_key').optional().trim().isLength({ min: 1 }).withMessage('API key cannot be empty if provided'),
   body('config_json').optional().isJSON().withMessage('Config must be valid JSON'),
@@ -154,7 +161,14 @@ router.put('/:id',
   param('id').isInt().withMessage('Provider ID must be an integer'),
   body('name').optional().trim().isLength({ min: 1, max: 100 }).withMessage('Name must be 1-100 characters'),
   body('provider_type').optional().isIn(['openai', 'anthropic', 'gemini', 'grok', 'local', 'custom']).withMessage('Invalid provider type'),
-  body('api_endpoint').optional().trim().isURL().withMessage('API endpoint must be a valid URL'),
+  body('api_endpoint').optional().trim().isLength({ min: 1 }).withMessage('API endpoint cannot be empty')
+    .custom((value) => {
+      // More lenient URL validation - just check it starts with http:// or https://
+      if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
+        throw new Error('API endpoint must start with http:// or https://');
+      }
+      return true;
+    }),
   body('model_name').optional().trim().isLength({ max: 100 }).withMessage('Model name max 100 characters'),
   body('api_key').optional().trim().isLength({ min: 1 }).withMessage('API key cannot be empty if provided'),
   body('config_json').optional().isJSON().withMessage('Config must be valid JSON'),

@@ -4,17 +4,23 @@ import { API_URL } from "../config";
 const MODEL = 'grok-3-mini-beta';
 
 const generateFullPrompt = (portfolio: Portfolio, marketData: Market[], basePrompt: string): string => {
-  const formattedMarketData = marketData.map(m => ` - ${m.symbol}: $${m.price.toFixed(4)} (24h change: ${m.price24hChange.toFixed(2)}%)`).join('\n');
-  const formattedPositions = portfolio.positions.length > 0
-    ? portfolio.positions.map(p => ` - ID: ${p.id}, Symbol: ${p.symbol}, Type: ${p.type}, Size: $${p.size}, Leverage: ${p.leverage}x, Entry: $${p.entryPrice.toFixed(4)}, SL: $${p.stopLoss?.toFixed(4)}, TP: $${p.takeProfit?.toFixed(4)}`).join('\n')
+  // Defensive null checks
+  if (!portfolio || !marketData) {
+    console.error('Invalid portfolio or marketData passed to generateFullPrompt');
+    return basePrompt;
+  }
+
+  const formattedMarketData = marketData.map(m => ` - ${m.symbol}: $${m.price?.toFixed(4) || '0.0000'} (24h change: ${m.price24hChange?.toFixed(2) || '0.00'}%)`).join('\n');
+  const formattedPositions = portfolio.positions && portfolio.positions.length > 0
+    ? portfolio.positions.map(p => ` - ID: ${p.id}, Symbol: ${p.symbol}, Type: ${p.type}, Size: $${p.size || 0}, Leverage: ${p.leverage}x, Entry: $${p.entryPrice?.toFixed(4) || '0.0000'}, SL: $${p.stopLoss?.toFixed(4) || 'N/A'}, TP: $${p.takeProfit?.toFixed(4) || 'N/A'}`).join('\n')
     : 'None';
 
   const currentDate = new Date().toUTCString();
 
   return basePrompt
-    .replace('{{totalValue}}', portfolio.totalValue.toFixed(2))
-    .replace('{{availableBalance}}', portfolio.balance.toFixed(2))
-    .replace('{{unrealizedPnl}}', portfolio.pnl.toFixed(2))
+    .replace('{{totalValue}}', (portfolio.totalValue ?? 0).toFixed(2))
+    .replace('{{availableBalance}}', (portfolio.balance ?? 0).toFixed(2))
+    .replace('{{unrealizedPnl}}', (portfolio.pnl ?? 0).toFixed(2))
     .replace('{{openPositions}}', formattedPositions)
     .replace('{{marketData}}', formattedMarketData)
     .replace('{{currentDate}}', currentDate);

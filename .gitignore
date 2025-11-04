@@ -22,3 +22,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Database files (contains API keys and sensitive data)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Environment files (contains secrets)
+.env
+.env.local
+.env.production
+server/.env
+
+# Backups
+data/backups/

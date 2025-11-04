@@ -110,8 +110,11 @@ const useTradingBots = (isGloballyPaused: boolean) => {
     const turnIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    const botFunctionsRef = useRef({
-        updatePortfolios: async () => {},
+    const botFunctionsRef = useRef<{
+        updatePortfolios: () => Promise<Market[]>;
+        runTradingTurn: (providedMarkets?: Market[]) => Promise<void>;
+    }>({
+        updatePortfolios: async () => [],
         runTradingTurn: async () => {}
     });
 
@@ -245,9 +248,9 @@ const useTradingBots = (isGloballyPaused: boolean) => {
     }, [symbolPrecisions]);
 
     useEffect(() => {
-        botFunctionsRef.current.updatePortfolios = async () => {
+        botFunctionsRef.current.updatePortfolios = async (): Promise<Market[]> => {
             const marketData = await getMarketData();
-            if (!marketData || marketData.length === 0) return;
+            if (!marketData || marketData.length === 0) return [];
             setMarkets(marketData);
 
             const updatedBots = await Promise.all(bots.map(async (bot) => {
@@ -289,20 +292,49 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 return { ...bot, portfolio: updatedPortfolio, valueHistory: newHistory, orders: updatedOrders, realizedPnl: updatedRealizedPnl };
             }));
             setBots(updatedBots);
+            return marketData; // Return the market data so it can be used immediately
         };
 
-        botFunctionsRef.current.runTradingTurn = async () => {
+        botFunctionsRef.current.runTradingTurn = async (providedMarkets?: Market[]) => {
+            console.log('🎲 Running trading turn for all active bots...');
+            
+            // Use provided markets or fall back to state
+            const activeMarkets = providedMarkets || markets;
+            
+            // Safety check: Ensure markets are loaded before processing trades
+            if (activeMarkets.length === 0) {
+                console.warn('⚠️ Market data not loaded yet, skipping trading turn');
+                return;
+            }
+            
+            console.log(`   📊 Available markets: ${activeMarkets.length}`, activeMarkets.map(m => m.symbol));
+            const activeBots = bots.filter(b => !b.isPaused);
+            console.log(`   Active bots: ${activeBots.length} / ${bots.length}`);
+            
             for (const bot of bots) {
-                if (bot.isPaused) continue;
+                if (bot.isPaused) {
+                    console.log(`   ⏭️ Skipping ${bot.name} - paused`);
+                    continue;
+                }
+                
+                console.log(`   🤖 Processing turn for ${bot.name} (${bot.tradingMode} mode)...`);
+
+                // Safety check: Skip if bot portfolio is not properly initialized
+                if (!bot.portfolio || bot.portfolio.balance == null) {
+                    console.log(`   ⚠️ Skipping ${bot.name} - portfolio not initialized`);
+                    continue;
+                }
 
                 setBots(current => current.map(b => b.id === bot.id ? { ...b, isLoading: true } : b));
                 
-                const { prompt, decisions } = await bot.getDecision(bot.portfolio, markets);
+                const { prompt, decisions } = await bot.getDecision(bot.portfolio, activeMarkets);
                 
                 const notes: string[] = [];
                 const validatedDecisions: { decision: AiDecision, adjustedLeverage: number }[] = [];
 
-                decisions.forEach(decision => {
+                console.log(`   📋 Processing ${decisions.length} decisions for ${bot.name}`);
+                decisions.forEach((decision, idx) => {
+                    console.log(`   Decision ${idx + 1}:`, decision);
                     // Rule: Minimum trade size
                     if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && decision.size && decision.size < MINIMUM_TRADE_SIZE_USD) {
                         notes.push(`REJECTED ${decision.action} ${decision.symbol}: Margin $${decision.size.toFixed(2)} is below minimum of $${MINIMUM_TRADE_SIZE_USD}.`);
@@ -331,11 +363,14 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                     validatedDecisions.push({ decision, adjustedLeverage });
                 });
 
+                console.log(`   ✅ ${validatedDecisions.length} decisions passed validation`);
+
                 let updatedBotState: BotState = { ...bot };
 
+                console.log(`   💼 Trading mode: ${bot.tradingMode}`);
                 if (bot.tradingMode === 'real') {
                     for (const { decision, adjustedLeverage } of validatedDecisions) {
-                        const market = markets.find(m => m.symbol === decision.symbol);
+                        const market = activeMarkets.find(m => m.symbol === decision.symbol);
                         try {
                             if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && market && decision.size && decision.symbol) {
                                 
@@ -438,10 +473,137 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                             }
                         }
                     }
-                } else { // Paper Trading Logic remains unchanged
-                    // ... (existing paper trading logic)
+                } else { // Paper Trading Logic
+                    console.log(`   📝 Executing paper trades for ${validatedDecisions.length} validated decisions`);
+                    for (const { decision, adjustedLeverage } of validatedDecisions) {
+                        console.log(`   🎯 Processing decision:`, decision.action, decision.symbol, `$${decision.size}`);
+                        const market = activeMarkets.find(m => m.symbol === decision.symbol);
+                        console.log(`   📊 Market found:`, market ? `${market.symbol} @ $${market.price}` : 'NOT FOUND');
+                        
+                        if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && market && decision.size && decision.symbol) {
+                            console.log(`   ✅ All conditions met for trade execution`);
+                            
+                            const availableBalance = updatedBotState.portfolio.balance;
+                            let tradeSize = decision.size;
+
+                            // STAGE 1: Check if balance can even cover the minimum trade.
+                            if (availableBalance < MINIMUM_TRADE_SIZE_USD) {
+                                notes.push(`REJECTED ${decision.action} ${decision.symbol}: Available balance $${availableBalance.toFixed(2)} is below the minimum trade size of $${MINIMUM_TRADE_SIZE_USD}.`);
+                                continue; // Skip this trade entirely
+                            }
+
+                            // STAGE 2: Adjust trade size if it exceeds available balance.
+                            if (tradeSize > availableBalance) {
+                                notes.push(`NOTE: Trade size for ${decision.symbol} adjusted from $${tradeSize.toFixed(2)} to fit available margin of $${availableBalance.toFixed(2)}.`);
+                                tradeSize = availableBalance; // Adjust size down to what's available
+                            }
+                            
+                            // Final check to ensure adjusted size is still valid.
+                            if (tradeSize < MINIMUM_TRADE_SIZE_USD) {
+                                notes.push(`REJECTED ${decision.action} ${decision.symbol}: Adjusted trade size $${tradeSize.toFixed(2)} is below minimum of $${MINIMUM_TRADE_SIZE_USD}.`);
+                                continue;
+                            }
+
+                            // Calculate liquidation price
+                            // For LONG: liquidation when price drops to where loss = margin (100% loss)
+                            // For SHORT: liquidation when price rises to where loss = margin (100% loss)
+                            // Formula: For LONG: entryPrice * (1 - (1 / leverage))
+                            //          For SHORT: entryPrice * (1 + (1 / leverage))
+                            const isLong = decision.action === AiAction.LONG;
+                            const liquidationPrice = isLong 
+                                ? market.price * (1 - (1 / adjustedLeverage))
+                                : market.price * (1 + (1 / adjustedLeverage));
+                            
+                            const position: Position = {
+                                id: `pos_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+                                symbol: decision.symbol,
+                                type: decision.action === AiAction.LONG ? OrderType.LONG : OrderType.SHORT,
+                                entryPrice: market.price,
+                                size: tradeSize,
+                                leverage: adjustedLeverage,
+                                liquidationPrice: liquidationPrice,
+                                stopLoss: decision.stopLoss,
+                                takeProfit: decision.takeProfit,
+                                pnl: 0,
+                            };
+                            updatedBotState.portfolio.positions.push(position);
+                            updatedBotState.portfolio.balance -= tradeSize;
+                            updatedBotState.tradeCount = (updatedBotState.tradeCount || 0) + 1;
+                            
+                            // Create order record for history (entry trade)
+                            const entryFee = tradeSize * 0.03; // 3% fee
+                            const entryOrder: Order = {
+                                id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+                                symbol: decision.symbol,
+                                type: decision.action === AiAction.LONG ? OrderType.LONG : OrderType.SHORT,
+                                size: tradeSize,
+                                leverage: adjustedLeverage,
+                                pnl: -entryFee, // Entry has negative PnL (just the fee)
+                                fee: entryFee,
+                                timestamp: Date.now(),
+                                entryPrice: market.price,
+                                exitPrice: 0, // Not closed yet
+                            };
+                            updatedBotState.orders = [entryOrder, ...(updatedBotState.orders || [])];
+                            
+                            console.log(`   🎉 Position created! ID: ${position.id}, New balance: $${updatedBotState.portfolio.balance.toFixed(2)}, Total positions: ${updatedBotState.portfolio.positions.length}, Total orders: ${updatedBotState.orders.length}`);
+                            notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position with $${tradeSize.toFixed(2)} margin at $${market.price.toFixed(2)}.`);
+                            // Set cooldown
+                            updatedBotState.symbolCooldowns[decision.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
+                        } else if (decision.action === AiAction.CLOSE && decision.closePositionId) {
+                            const posToClose = updatedBotState.portfolio.positions.find(p => p.id === decision.closePositionId);
+                            if (posToClose) {
+                                const market = activeMarkets.find(m => m.symbol === posToClose.symbol);
+                                if (market) {
+                                    // Calculate quantity based on size, leverage, and entry price
+                                    const assetQuantity = (posToClose.size * posToClose.leverage) / posToClose.entryPrice;
+                                    
+                                    // Calculate PnL based on price movement and quantity
+                                    const unrealizedPnl = posToClose.type === OrderType.LONG
+                                        ? (market.price - posToClose.entryPrice) * assetQuantity
+                                        : (posToClose.entryPrice - market.price) * assetQuantity;
+                                    
+                                    const exitFee = posToClose.size * 0.03; // 3% fee on exit (on the margin/size)
+                                    const netPnl = unrealizedPnl - exitFee;
+                                    
+                                    updatedBotState.portfolio.balance += posToClose.size + netPnl;
+                                    updatedBotState.portfolio.positions = updatedBotState.portfolio.positions.filter(p => p.id !== posToClose.id);
+                                    updatedBotState.realizedPnl = (updatedBotState.realizedPnl || 0) + netPnl;
+                                    
+                                    // Create order record for history (exit trade)
+                                    const exitOrder: Order = {
+                                        id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+                                        symbol: posToClose.symbol,
+                                        type: posToClose.type,
+                                        size: posToClose.size,
+                                        leverage: posToClose.leverage,
+                                        pnl: netPnl,
+                                        fee: exitFee,
+                                        timestamp: Date.now(),
+                                        entryPrice: posToClose.entryPrice,
+                                        exitPrice: market.price,
+                                    };
+                                    updatedBotState.orders = [exitOrder, ...(updatedBotState.orders || [])];
+                                    
+                                    if (netPnl > 0) {
+                                        const wins = (updatedBotState.tradeCount || 0) * (updatedBotState.winRate || 0);
+                                        updatedBotState.winRate = (wins + 1) / (updatedBotState.tradeCount || 1);
+                                    }
+                                    
+                                    notes.push(`SUCCESS: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
+                                    // Set cooldown after closing
+                                    updatedBotState.symbolCooldowns[posToClose.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
+                                }
+                            } else {
+                                notes.push(`NOTE: Position ${decision.closePositionId} not found, may have been auto-closed.`);
+                            }
+                        }
+                    }
                 }
 
+                console.log(`   📝 Notes generated:`, notes);
+                console.log(`   📊 Final state: Balance=$${updatedBotState.portfolio.balance.toFixed(2)}, Positions=${updatedBotState.portfolio.positions.length}, Orders=${updatedBotState.orders?.length || 0}, Trades=${updatedBotState.tradeCount}`);
+                
                 const newLog: BotLog = { timestamp: Date.now(), decisions, prompt, notes };
                 updatedBotState.botLogs = [newLog, ...updatedBotState.botLogs].slice(0, 50);
                 
@@ -451,13 +613,43 @@ const useTradingBots = (isGloballyPaused: boolean) => {
     }, [bots, markets, symbolPrecisions, getAdjustedQuantity]);
 
     useEffect(() => {
+        console.log('🔄 Trading intervals check:', {
+            isGloballyPaused,
+            botsLength: bots.length,
+            isLoading,
+            botDetails: bots.map(b => ({ id: b.id, name: b.name, isPaused: b.isPaused }))
+        });
+
         if (isGloballyPaused || bots.length === 0 || isLoading) {
+            console.log('⏸️ Clearing trading intervals - paused or loading');
             if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
             if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
             return;
         }
 
-        botFunctionsRef.current.updatePortfolios();
+        console.log('▶️ Starting trading intervals...');
+        
+        // Execute first portfolio update and trading turn immediately (but in sequence)
+        (async () => {
+            console.log('📊 Loading market data first...');
+            const loadedMarkets = await botFunctionsRef.current.updatePortfolios();
+            
+            // Check if any bot has made a decision recently (within the turn interval)
+            const now = Date.now();
+            const hasRecentDecisions = bots.some(bot => 
+                bot.botLogs && bot.botLogs.length > 0 && 
+                (now - bot.botLogs[0].timestamp < TURN_INTERVAL_MS)
+            );
+            
+            if (hasRecentDecisions) {
+                const timeUntilNext = TURN_INTERVAL_MS - (now - Math.max(...bots.filter(b => b.botLogs && b.botLogs.length > 0).map(b => b.botLogs[0].timestamp)));
+                console.log(`⏳ Recent decisions detected. Next trading turn in ${Math.ceil(timeUntilNext / 1000)}s`);
+            } else {
+                console.log('⚡ Executing first trading turn immediately...');
+                await botFunctionsRef.current.runTradingTurn(loadedMarkets);
+            }
+        })();
+        
         refreshIntervalRef.current = setInterval(() => botFunctionsRef.current.updatePortfolios(), REFRESH_INTERVAL_MS);
         turnIntervalRef.current = setInterval(() => botFunctionsRef.current.runTradingTurn(), TURN_INTERVAL_MS);
 
@@ -468,29 +660,67 @@ const useTradingBots = (isGloballyPaused: boolean) => {
     }, [isGloballyPaused, bots.length, isLoading]);
 
     const resetBot = async (botId: string) => {
+        console.log(`🔄 resetBot called for: ${botId}`);
+        
         const botToReset = bots.find(b => b.id === botId);
         if (botToReset && botToReset.tradingMode === 'real') {
+            console.log('❌ Cannot reset real trading bot');
             alert("Cannot reset a bot that is trading with real funds.");
             return;
         }
-        if (!window.confirm("Are you sure you want to reset this bot?")) return;
         
-        // Fetch the latest bot config from API
-        const botConfigs = await fetchBotConfigs();
-        const config = botConfigs.find(c => c.id === botId);
-        
-        if (!config) {
-            alert("Bot configuration not found in database.");
+        console.log('Showing confirmation dialog...');
+        if (!window.confirm("Are you sure you want to reset this bot? This will clear all positions, trades, and AI logs.")) {
+            console.log('User cancelled reset');
             return;
         }
+        
+        console.log('User confirmed reset, proceeding...');
+        
+        try {
+            // Call the backend API to reset the bot in the database
+            const token = localStorage.getItem('token');
+            console.log(`Calling API: ${API_BASE_URL}/api/v2/bots/${botId}/reset`);
+            
+            const response = await fetch(`${API_BASE_URL}/api/v2/bots/${botId}/reset`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+            });
 
-        setBots(prev => prev.map(b => {
-            if (b.id === botId) {
-                initialBalanceRef.current.delete(botId);
-                return createNewBot(config.id, config.name, config.prompt, config.provider, config.mode);
+            console.log('API response status:', response.status);
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('API error:', errorData);
+                throw new Error(errorData.error || 'Failed to reset bot');
             }
-            return b;
-        }));
+
+            const result = await response.json();
+            console.log(`✅ Backend reset successful:`, result);
+
+            // Clear the persisted arena state completely (best effort)
+            console.log('Clearing arena_state...');
+            fetch(`${API_BASE_URL}/api/state`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(() => console.log('Arena state cleared'))
+              .catch(err => console.warn('Could not clear arena_state:', err));
+            
+        } catch (error) {
+            console.error('❌ Error resetting bot:', error);
+            alert(`Failed to reset bot: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            return; // Don't reload if reset failed
+        }
+
+        // Force a full page reload to reinitialize everything from the database
+        // Do this OUTSIDE the try-catch to ensure it always happens after successful reset
+        console.log('🔄 Reloading page to refresh bot state...');
+        setTimeout(() => {
+            window.location.reload();
+        }, 500); // Small delay to ensure DELETE completes
     };
 
     const manualClosePosition = async (botId: string, positionId: string) => {
