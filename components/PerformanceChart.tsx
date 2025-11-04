@@ -123,19 +123,19 @@ const PerformanceChart: React.FC<ArenaPerformanceChartProps> = ({ series, initia
   }, [series, initialBalance, hasEnoughData]);
 
   return (
-    <div className="bg-gray-800/50 rounded-lg shadow-lg border border-gray-700">
-      <div className="p-4 flex justify-between items-center border-b border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-300">Bot Arena Performance</h2>
-        <div className="flex space-x-4">
+    <div className="bg-gray-800/50 rounded-lg shadow-lg border border-gray-700 overflow-hidden">
+      <div className="p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-gray-700">
+        <h2 className="text-lg font-semibold text-gray-300 shrink-0">Bot Arena Performance</h2>
+        <div className="flex flex-wrap gap-3 sm:gap-4">
           {series.map(s => (
-            <div key={s.name} className="flex items-center space-x-2">
+            <div key={s.name} className="flex items-center space-x-2 shrink-0">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: botColorMap[s.name] || defaultColor }}></div>
-              <span className="text-sm font-medium text-gray-300">{s.name}</span>
+              <span className="text-sm font-medium text-gray-300 whitespace-nowrap">{s.name}</span>
             </div>
           ))}
         </div>
       </div>
-      <div className="p-2 relative h-64">
+      <div className="p-2 relative h-64 sm:h-80">
         {!hasEnoughData && (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-gray-500">Waiting for more trading data to generate performance chart...</p>

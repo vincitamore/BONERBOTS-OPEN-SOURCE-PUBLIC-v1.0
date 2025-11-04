@@ -338,5 +338,47 @@ router.post('/:id/reset',
   }
 );
 
+/**
+ * POST /api/bots/:id/snapshot - Save bot state snapshot
+ * Body: { balance, total_value, realized_pnl, unrealized_pnl, position_count, trade_count, win_rate }
+ */
+router.post('/:id/snapshot',
+  optionalAuth, // Allow without auth for local instances
+  param('id').notEmpty().withMessage('Bot ID is required'),
+  body('balance').isFloat().withMessage('Balance must be a number'),
+  body('total_value').isFloat().withMessage('Total value must be a number'),
+  body('realized_pnl').optional().isFloat().withMessage('Realized PnL must be a number'),
+  body('unrealized_pnl').optional().isFloat().withMessage('Unrealized PnL must be a number'),
+  body('position_count').optional().isInt().withMessage('Position count must be an integer'),
+  body('trade_count').optional().isInt().withMessage('Trade count must be an integer'),
+  body('win_rate').optional().isFloat({ min: 0, max: 1 }).withMessage('Win rate must be between 0 and 1'),
+  validateRequest,
+  (req, res) => {
+    try {
+      const bot = db.getBot(req.params.id);
+      if (!bot) {
+        return res.status(404).json({ error: 'Bot not found' });
+      }
+      
+      const snapshotData = {
+        bot_id: req.params.id,
+        balance: req.body.balance,
+        total_value: req.body.total_value,
+        realized_pnl: req.body.realized_pnl || 0,
+        unrealized_pnl: req.body.unrealized_pnl || 0,
+        position_count: req.body.position_count || 0,
+        trade_count: req.body.trade_count || 0,
+        win_rate: req.body.win_rate || 0
+      };
+      
+      const snapshot = db.createSnapshot(snapshotData);
+      res.json({ success: true, snapshot });
+    } catch (error) {
+      console.error('Error creating snapshot:', error);
+      res.status(500).json({ error: 'Failed to create snapshot', message: error.message });
+    }
+  }
+);
+
 module.exports = router;
 

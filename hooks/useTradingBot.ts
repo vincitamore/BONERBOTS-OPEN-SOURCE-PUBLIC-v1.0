@@ -111,6 +111,28 @@ const useTradingBots = (isGloballyPaused: boolean) => {
     const [symbolPrecisions, setSymbolPrecisions] = useState<Map<string, SymbolPrecisionInfo>>(new Map());
     const [isLoading, setIsLoading] = useState(true);
     const initialBalanceRef = useRef<Map<string, number>>(new Map());
+    
+    // Helper function to save bot state snapshot to database for analytics
+    const saveSnapshot = async (bot: BotState) => {
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post(`${API_BASE_URL}/api/v2/bots/${bot.id}/snapshot`, {
+                balance: bot.portfolio.balance,
+                total_value: bot.portfolio.totalValue,
+                realized_pnl: bot.realizedPnl || 0,
+                unrealized_pnl: bot.portfolio.pnl || 0,
+                position_count: bot.portfolio.positions.length,
+                trade_count: bot.tradeCount || 0,
+                win_rate: bot.winRate || 0
+            }, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+            console.log(`💾 Snapshot saved for ${bot.name}`);
+        } catch (error) {
+            console.error(`Failed to save snapshot for ${bot.name}:`, error);
+            // Don't throw - this is non-critical
+        }
+    };
 
 
     const turnIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -300,6 +322,12 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 return { ...bot, portfolio: updatedPortfolio, valueHistory: newHistory, orders: updatedOrders, realizedPnl: updatedRealizedPnl };
             }));
             setBots(updatedBots);
+            
+            // Save snapshots for all bots after portfolio update (non-blocking)
+            updatedBots.forEach(bot => {
+                saveSnapshot(bot).catch(err => console.error(`Failed to save snapshot for ${bot.name}:`, err));
+            });
+            
             return marketData; // Return the market data so it can be used immediately
         };
 
@@ -544,7 +572,6 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                             };
                             updatedBotState.portfolio.positions.push(position);
                             updatedBotState.portfolio.balance -= tradeSize;
-                            updatedBotState.tradeCount = (updatedBotState.tradeCount || 0) + 1;
                             
                             // Create order record for history (entry trade)
                             const entryFee = tradeSize * 0.03; // 3% fee
@@ -585,6 +612,19 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                                     updatedBotState.portfolio.positions = updatedBotState.portfolio.positions.filter(p => p.id !== posToClose.id);
                                     updatedBotState.realizedPnl = (updatedBotState.realizedPnl || 0) + netPnl;
                                     
+                                    // Increment trade count (a trade is complete when closed)
+                                    const previousTradeCount = updatedBotState.tradeCount || 0;
+                                    updatedBotState.tradeCount = previousTradeCount + 1;
+                                    
+                                    // Update win rate
+                                    if (netPnl > 0) {
+                                        const previousWins = Math.round(previousTradeCount * (updatedBotState.winRate || 0));
+                                        updatedBotState.winRate = (previousWins + 1) / updatedBotState.tradeCount;
+                                    } else {
+                                        const previousWins = Math.round(previousTradeCount * (updatedBotState.winRate || 0));
+                                        updatedBotState.winRate = previousWins / updatedBotState.tradeCount;
+                                    }
+                                    
                                     // Create order record for history (exit trade)
                                     const exitOrder: Order = {
                                         id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -599,11 +639,6 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                                         exitPrice: market.price,
                                     };
                                     updatedBotState.orders = [exitOrder, ...(updatedBotState.orders || [])];
-                                    
-                                    if (netPnl > 0) {
-                                        const wins = (updatedBotState.tradeCount || 0) * (updatedBotState.winRate || 0);
-                                        updatedBotState.winRate = (wins + 1) / (updatedBotState.tradeCount || 1);
-                                    }
                                     
                                     notes.push(`SUCCESS: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
                                     // Track cooldown for informational purposes (shown in bot's next prompt)
@@ -623,9 +658,12 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 updatedBotState.botLogs = [newLog, ...updatedBotState.botLogs].slice(0, 50);
                 
                 setBots(current => current.map(b => b.id === bot.id ? { ...updatedBotState, isLoading: false } : b));
+                
+                // Save snapshot to database for analytics (non-blocking)
+                saveSnapshot(updatedBotState);
             }
         };
-    }, [bots, markets, symbolPrecisions, getAdjustedQuantity]);
+    }, [bots, markets, symbolPrecisions, getAdjustedQuantity, saveSnapshot]);
 
     useEffect(() => {
         console.log('🔄 Trading intervals check:', {

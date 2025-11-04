@@ -75,23 +75,24 @@ export const BotsPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-100">Trading Bots</h1>
-          <p className="text-gray-400 mt-1">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-100">Trading Bots</h1>
+          <p className="text-gray-400 mt-1 text-sm sm:text-base">
             Manage your AI trading bots, configure their strategies, and monitor their performance
           </p>
         </div>
         <button
           onClick={() => navigate('/config/bots/new')}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Create New Bot
+          <span className="hidden sm:inline">Create New Bot</span>
+          <span className="sm:hidden">Create Bot</span>
         </button>
       </div>
 
@@ -143,14 +144,14 @@ export const BotsPage: React.FC = () => {
           {activeBots.map((bot) => (
             <div
               key={bot.id}
-              className="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors"
+              className="bg-gray-800 rounded-lg p-4 sm:p-6 border border-gray-700 hover:border-gray-600 transition-colors"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-xl font-semibold text-gray-100">{bot.name}</h3>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <h3 className="text-lg sm:text-xl font-semibold text-gray-100">{bot.name}</h3>
                     <span
-                      className={`px-2 py-1 rounded text-xs font-medium ${
+                      className={`px-2 py-1 rounded text-xs font-medium shrink-0 ${
                         bot.trading_mode === 'paper'
                           ? 'bg-blue-900/50 text-blue-300'
                           : 'bg-green-900/50 text-green-300'
@@ -159,13 +160,13 @@ export const BotsPage: React.FC = () => {
                       {bot.trading_mode === 'paper' ? 'Paper Trading' : 'Live Trading'}
                     </span>
                     {bot.is_paused && (
-                      <span className="px-2 py-1 rounded text-xs font-medium bg-orange-900/50 text-orange-300">
+                      <span className="px-2 py-1 rounded text-xs font-medium bg-orange-900/50 text-orange-300 shrink-0">
                         Paused
                       </span>
                     )}
                   </div>
                   <p className="text-gray-400 text-sm mb-3 line-clamp-2">{bot.prompt}</p>
-                  <div className="flex items-center gap-4 text-sm text-gray-500">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-sm text-gray-500">
                     <span>
                       <span className="font-medium">Provider:</span> {bot.provider_name || 'Unknown'}
                     </span>
@@ -175,17 +176,17 @@ export const BotsPage: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                <div className="flex flex-col gap-2 ml-6">
+                <div className="flex flex-row lg:flex-col gap-2 shrink-0">
                   <button
                     onClick={() => navigate(`/config/bots/${bot.id}`)}
-                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm font-medium transition-colors"
+                    className="flex-1 lg:flex-initial px-3 sm:px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm font-medium transition-colors"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => handlePauseToggle(bot.id, bot.is_paused)}
                     disabled={actionLoading === bot.id}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`flex-1 lg:flex-initial px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                       bot.is_paused
                         ? 'bg-green-600 hover:bg-green-700 text-white'
                         : 'bg-orange-600 hover:bg-orange-700 text-white'
@@ -197,7 +198,7 @@ export const BotsPage: React.FC = () => {
                     <button
                       onClick={() => handleReset(bot.id, bot.name)}
                       disabled={actionLoading === bot.id}
-                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 lg:flex-initial px-3 sm:px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {actionLoading === bot.id ? '...' : 'Reset'}
                     </button>
@@ -205,7 +206,7 @@ export const BotsPage: React.FC = () => {
                   <button
                     onClick={() => handleDelete(bot.id, bot.name)}
                     disabled={actionLoading === bot.id}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 lg:flex-initial px-3 sm:px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {actionLoading === bot.id ? '...' : 'Delete'}
                   </button>
