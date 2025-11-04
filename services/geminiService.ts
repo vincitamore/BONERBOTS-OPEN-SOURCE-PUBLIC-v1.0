@@ -38,7 +38,7 @@ export const getTradingDecision = async (portfolio: Portfolio, marketData: Marke
     const contentType = response.headers.get('content-type');
     if (!response.ok || !contentType || !contentType.includes('application/json')) {
         const errorText = await response.text();
-        throw new Error(`Gemini proxy error: Expected JSON but received ${contentType}. Status: ${response.status}. Body: ${errorText.substring(0, 200)}`);
+        throw new Error(`Gemini API error: Expected JSON but received ${contentType}. Status: ${response.status}. Body: ${errorText.substring(0, 200)}`);
     }
 
     const responseData = await response.json();
@@ -53,7 +53,7 @@ export const getTradingDecision = async (portfolio: Portfolio, marketData: Marke
     return { prompt, decisions: validDecisions };
 
   } catch (error) {
-    console.error("Error getting trading decision from Gemini via proxy:", error);
+    console.error("Error getting trading decision from Gemini:", error);
     return { prompt, decisions: [] };
   }
 };

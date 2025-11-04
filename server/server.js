@@ -50,7 +50,7 @@ function createHmacSha256Signature(data, secret) {
 // ============ API ROUTES ============
 
 /**
- * POST /api/gemini - Proxy to Google Gemini API
+ * POST /api/gemini - Forward requests to Google Gemini API
  */
 app.post('/api/gemini', async (req, res) => {
   try {
@@ -85,7 +85,7 @@ app.post('/api/gemini', async (req, res) => {
 });
 
 /**
- * POST /api/grok - Proxy to xAI Grok API
+ * POST /api/grok - Forward requests to xAI Grok API
  */
 app.post('/api/grok', async (req, res) => {
   try {

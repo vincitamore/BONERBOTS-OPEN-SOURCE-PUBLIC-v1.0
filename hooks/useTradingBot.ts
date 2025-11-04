@@ -49,10 +49,10 @@ function createNewBot(id: string, name: string, prompt: string, provider: 'gemin
 // ====================================================================================
 // CRITICAL CONFIGURATION: Bot Definitions
 // The `id` field is the most important part of this configuration.
-// It MUST EXACTLY match the prefix used for the API key secrets in your Cloudflare Worker.
-// For example, `id: 'bot_degen'` requires secrets named `DEGEN_LIVE_API_KEY` and `DEGEN_LIVE_SECRET`.
-// This `id` is sent with every trade request to the worker, which then selects the
-// correct encrypted API keys to use for the trade.
+// It MUST EXACTLY match the prefix used for the API key environment variables in server/.env.
+// For example, `id: 'bot_degen'` requires environment variables named `DEGEN_LIVE_API_KEY` and `DEGEN_LIVE_SECRET`.
+// This `id` is sent with every trade request to the server, which then selects the
+// correct API keys to use for the trade.
 // ====================================================================================
 const botConfigs: { id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real' }[] = [
     { id: 'bot_degen', name: 'DEGEN LIVE', prompt: DEGEN_PROMPT, provider: 'grok', mode: 'real' },

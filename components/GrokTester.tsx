@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
-// Fix: Replaced the non-existent 'CORS_PROXY_URL' with 'PROXY_URL' to resolve the module import error.
-// The proxied URL has been updated to use the correct path (`/grok`) consistent with the application's Cloudflare Worker configuration.
-import { PROXY_URL } from '../config';
+import { API_URL } from '../config';
 
-const PROXIED_URL = `${PROXY_URL}/grok`;
+const API_ENDPOINT = `${API_URL}/api/grok`;
 const MODEL = 'grok-3-mini-beta';
 
 interface GrokTesterProps {
@@ -25,7 +23,7 @@ const GrokTester: React.FC<GrokTesterProps> = ({ apiKey }) => {
     setError(null);
 
     try {
-      const res = await fetch(PROXIED_URL, {
+      const res = await fetch(API_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -42,7 +40,7 @@ const GrokTester: React.FC<GrokTesterProps> = ({ apiKey }) => {
       const responseBodyText = await res.text();
 
       if (!res.ok) {
-        throw new Error(`Grok API error (via proxy): ${res.status} - ${responseBodyText}`);
+        throw new Error(`Grok API error (via server): ${res.status} - ${responseBodyText}`);
       }
       
       const responseData = JSON.parse(responseBodyText);
@@ -64,8 +62,8 @@ const GrokTester: React.FC<GrokTesterProps> = ({ apiKey }) => {
 
   return (
     <div className="fixed bottom-4 right-4 bg-gray-800 border border-gray-700 rounded-lg p-4 shadow-2xl w-full max-w-md z-50">
-      <h3 className="text-lg font-bold text-sky-400 mb-2">Grok API Proxy Tester</h3>
-      <p className="text-sm text-gray-400 mb-4">Use this to test if your xAI API key is working correctly via the CORS proxy.</p>
+      <h3 className="text-lg font-bold text-sky-400 mb-2">Grok API Tester</h3>
+      <p className="text-sm text-gray-400 mb-4">Use this to test if your xAI API key is working correctly via the local server.</p>
       <button
         onClick={handleTest}
         disabled={loading || !apiKey}

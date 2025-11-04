@@ -2,8 +2,8 @@
 /**
  * Configuration for the BONERBOTS AI Arena (Local Edition)
  * 
- * This application now runs on a local Express server instead of using
- * Cloudflare Workers and Supabase. The configuration is much simpler.
+ * This application runs on a local Express server with SQLite database.
+ * The configuration is simple and straightforward.
  */
 
 /**

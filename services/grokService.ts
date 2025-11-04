@@ -43,7 +43,7 @@ export const getGrokTradingDecision = async (portfolio: Portfolio, marketData: M
     const contentType = response.headers.get('content-type');
     if (!response.ok || !contentType || !contentType.includes('application/json')) {
         const errorText = await response.text();
-        throw new Error(`Grok proxy error: Expected JSON but received ${contentType}. Status: ${response.status}. Body: ${errorText.substring(0, 200)}`);
+        throw new Error(`Grok API error: Expected JSON but received ${contentType}. Status: ${response.status}. Body: ${errorText.substring(0, 200)}`);
     }
       
     const responseData = await response.json();
@@ -75,7 +75,7 @@ export const getGrokTradingDecision = async (portfolio: Portfolio, marketData: M
     }
 
   } catch (error) {
-    console.error("Error getting trading decision from Grok via proxy:", error);
+    console.error("Error getting trading decision from Grok:", error);
     return { prompt, decisions: [] };
   }
 };
