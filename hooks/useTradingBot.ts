@@ -353,15 +353,8 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                         return;
                     }
 
-                    // Rule: Symbol Cooldown
-                    if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && decision.symbol) {
-                        const cooldownEndTime = bot.symbolCooldowns[decision.symbol];
-                        if (cooldownEndTime && Date.now() < cooldownEndTime) {
-                            const minutesLeft = ((cooldownEndTime - Date.now()) / 60000).toFixed(1);
-                            notes.push(`REJECTED ${decision.action} ${decision.symbol}: Symbol is on cooldown for ${minutesLeft} more minutes.`);
-                            return;
-                        }
-                    }
+                    // NOTE: No hard cooldown enforcement - bots see cooldown info in their prompt and can make informed decisions
+                    // They have access to their decision history and can choose whether to respect cooldowns or not
 
                     // Rule: Adjust Leverage
                     let adjustedLeverage = decision.leverage || 1;
@@ -470,9 +463,9 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                                             quantity,
                                             reduceOnly: 'true',
                                         }, bot.id);
-                                        // Set cooldown after closing
+                                        // Track cooldown for informational purposes (shown in bot's next prompt)
                                         updatedBotState.symbolCooldowns[posToClose.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
-                                        notes.push(`SUCCESS: Closed ${posToClose.symbol} position. Cooldown initiated.`);
+                                        notes.push(`SUCCESS: Closed ${posToClose.symbol} position.`);
                                     }
                                 }
                             }
@@ -602,7 +595,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                                     }
                                     
                                     notes.push(`SUCCESS: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
-                                    // Set cooldown after closing
+                                    // Track cooldown for informational purposes (shown in bot's next prompt)
                                     updatedBotState.symbolCooldowns[posToClose.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
                                 }
                             } else {
@@ -798,7 +791,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                     return b;
                 }));
 
-                alert(`Position closed successfully on exchange. ${posToClose.symbol} is now on cooldown.`);
+                alert(`Position closed successfully on exchange.`);
 
             } else {
                 // Paper trading: Calculate PnL and update local state
@@ -869,7 +862,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 }));
 
                 console.log(`✅ Paper position closed. PnL: $${netPnl.toFixed(2)}`);
-                alert(`Position closed successfully!\nPnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})\n${posToClose.symbol} is now on cooldown.`);
+                alert(`Position closed successfully!\nPnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
             }
 
             // Trigger portfolio update to refresh all data
