@@ -58,11 +58,11 @@ function createNewBot(id: string, name: string, prompt: string, provider: 'gemin
         tradeCount: 0,
         winRate: 0,
         symbolCooldowns: {},
-        getDecision: (portfolio: Portfolio, marketData: Market[]) => {
+        getDecision: (portfolio: Portfolio, marketData: Market[], recentLogs?: BotLog[], cooldowns?: Record<string, number>, recentOrders?: Order[]) => {
             if (provider === 'grok') {
-                return getGrokTradingDecision(portfolio, marketData, prompt);
+                return getGrokTradingDecision(portfolio, marketData, prompt, recentLogs, cooldowns, recentOrders);
             }
-            return getTradingDecision(portfolio, marketData, prompt);
+            return getTradingDecision(portfolio, marketData, prompt, recentLogs, cooldowns, recentOrders);
         }
     };
 }
@@ -327,7 +327,8 @@ const useTradingBots = (isGloballyPaused: boolean) => {
 
                 setBots(current => current.map(b => b.id === bot.id ? { ...b, isLoading: true } : b));
                 
-                const { prompt, decisions } = await bot.getDecision(bot.portfolio, activeMarkets);
+                // Pass recent decision history and cooldowns to the bot so it has context
+                const { prompt, decisions } = await bot.getDecision(bot.portfolio, activeMarkets, bot.botLogs.slice(0, 5), bot.symbolCooldowns, bot.orders.slice(0, 10));
                 
                 const notes: string[] = [];
                 const validatedDecisions: { decision: AiDecision, adjustedLeverage: number }[] = [];
@@ -548,8 +549,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                             
                             console.log(`   🎉 Position created! ID: ${position.id}, New balance: $${updatedBotState.portfolio.balance.toFixed(2)}, Total positions: ${updatedBotState.portfolio.positions.length}, Total orders: ${updatedBotState.orders.length}`);
                             notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position with $${tradeSize.toFixed(2)} margin at $${market.price.toFixed(2)}.`);
-                            // Set cooldown
-                            updatedBotState.symbolCooldowns[decision.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
+                            // DO NOT set cooldown when opening - only when closing!
                         } else if (decision.action === AiAction.CLOSE && decision.closePositionId) {
                             const posToClose = updatedBotState.portfolio.positions.find(p => p.id === decision.closePositionId);
                             if (posToClose) {

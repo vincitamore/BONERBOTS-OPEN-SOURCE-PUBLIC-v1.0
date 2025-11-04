@@ -94,7 +94,7 @@ export interface BotState {
   tradeCount: number;
   winRate: number;
   symbolCooldowns: Record<string, number>; // Maps symbol to cooldown end timestamp
-  getDecision: (portfolio: Portfolio, marketData: Market[]) => Promise<{ prompt: string, decisions: AiDecision[] }>;
+  getDecision: (portfolio: Portfolio, marketData: Market[], recentLogs?: BotLog[], cooldowns?: Record<string, number>, recentOrders?: Order[]) => Promise<{ prompt: string, decisions: AiDecision[] }>;
 }
 
 export type SerializableBotState = Omit<BotState, 'getDecision'>;

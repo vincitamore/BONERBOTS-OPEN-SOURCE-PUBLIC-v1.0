@@ -49,6 +49,11 @@ Open Positions:
 Live Market Data:
 {{marketData}}
 
+IMPORTANT: Your recent decision history is provided below. As a sophisticated strategist:
+- Avoid reactive position flipping - give your well-researched theses time to materialize
+- Factor in 6% round-trip costs (3% entry + 3% exit fees) before closing positions prematurely
+- Only close positions if there's genuine strategic justification, not minor price fluctuations
+
 Your task is to analyze the market and portfolio, then provide your decisions as a JSON array of objects.
 
 Decision Rules:
@@ -85,6 +90,11 @@ Open Positions:
 
 Live Market Data:
 {{marketData}}
+
+IMPORTANT: You'll see your recent decision history below. Before closing a position you just opened, ask yourself:
+- Did my original thesis actually change, or am I just reacting to noise?
+- Have I given this position enough time to play out?
+- Am I really willing to eat 6% in fees (3% entry + 3% exit) for this flip-flop?
 
 Your job is to make trades. Respond with a JSON array of your decisions.
 
@@ -124,6 +134,11 @@ Open Positions:
 
 Live Market Data:
 {{marketData}}
+
+IMPORTANT: The cosmos will show you your recent decisions below. Before closing a position prematurely:
+- Consider whether the celestial alignment has truly shifted, or if you're reacting to fleeting cosmic turbulence
+- Remember: Each trade cycle costs 6% in earthly fees (3% entry + 3% exit)
+- Young positions need time to align with their destined trajectory
 
 Consult the stars and the current market data to make your trading decisions. Respond with a JSON array of decision objects.
 
@@ -284,6 +299,12 @@ Open Positions:
 
 Live Market Data:
 {{marketData}}
+
+IMPORTANT: You will also see your recent decision history below showing your past actions and reasoning. Review this context carefully:
+- If you just opened a position minutes ago, consider whether your original thesis still holds before closing prematurely
+- Each trade has 3% entry + 3% exit fees (6% total round-trip cost) - factor this into your decision calculus
+- Positions less than 30 minutes old should only be closed if there's a compelling regime shift or stop-loss breach
+- Your past reasoning represents your prior Bayesian beliefs - update them with new evidence, not random fluctuations
 
 Analyze the market through your chronometric-cliometric lens and respond with a JSON array of decision objects.
 
