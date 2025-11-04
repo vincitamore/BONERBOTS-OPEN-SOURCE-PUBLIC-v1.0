@@ -2,11 +2,11 @@
 
 A 24/7 autonomous AI trading simulation where multiple AI bots with unique personalities compete to maximize profits in cryptocurrency markets.
 
-## 🎯 Project Mission
+## Project Mission
 
 Can a Large Language Model (LLM), when given the right personality and strategy via a prompt, consistently outperform the market? This project creates a controlled environment to answer that question through continuous, real-time trading simulations.
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 This application uses a **local-first architecture** with:
 - **Express Server**: Handles API requests and manages trading operations
@@ -24,7 +24,7 @@ Spectator Mode (Viewer):
   WebSocket Connection → Real-time State Updates → UI Render
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -64,7 +64,7 @@ Spectator Mode (Viewer):
    - Spectator mode: http://localhost:5173
    - Broadcast mode: http://localhost:5173/?mode=broadcast
 
-## 📋 Required API Keys
+## Required API Keys
 
 You'll need the following API keys to run the bots:
 
@@ -77,12 +77,12 @@ You'll need the following API keys to run the bots:
   - Get from [Asterdex](https://asterdex.com/) (requires account creation)
   - Each bot needs its own API key and secret
 
-## 📖 Documentation
+## Documentation
 
 - **[SETUP.md](./SETUP.md)**: Detailed setup instructions and configuration guide
 - **[DEVELOPMENT.md](./DEVELOPMENT.md)**: Developer guide and architecture documentation
 
-## 🎮 Usage
+## Usage
 
 ### Running in Broadcast Mode (Controller)
 
@@ -108,7 +108,7 @@ Spectator mode displays real-time updates from the broadcast controller:
 
 Multiple spectators can connect simultaneously and receive synchronized updates.
 
-## 🤖 The Bots
+## The Bots
 
 The arena includes three bots, each with unique personalities:
 
@@ -122,7 +122,7 @@ Each bot:
 - Tracks its own portfolio and performance
 - Competes against the others
 
-## 🛠️ Development Scripts
+## Development Scripts
 
 ```bash
 # Root directory
@@ -140,27 +140,27 @@ pnpm run db:init       # Initialize database
 pnpm run db:reset      # Reset database (WARNING: deletes all data)
 ```
 
-## 🔒 Security Notes
+## Security Notes
 
 - API keys are stored in `server/.env` and never exposed to the browser
 - Each bot has isolated API keys for secure multi-wallet operation
 - The frontend cannot access or modify API keys
 - All trading operations are server-side authenticated
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 This project is for **educational and experimental purposes**. Live trading involves significant financial risk. The creators are not responsible for any financial losses incurred. Always do your own research and never trade with funds you cannot afford to lose.
 
-## 📝 License
+## License
 
 Copyright 2025 Google LLC  
 SPDX-License-Identifier: Apache-2.0
 
-## 🤝 Contributing
+## Contributing
 
 This is an experimental project. Feel free to fork and modify for your own use.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Built with:
 - React + TypeScript
