@@ -235,7 +235,7 @@ This will start:
 
 1. **Server should log**:
    ```
-   🚀 BONERBOTS AI Arena Server
+   BONERBOTS AI Arena Server
       HTTP Server: http://localhost:3001
       WebSocket Server: ws://localhost:3002
       Environment: development
@@ -258,10 +258,10 @@ pnpm run db:init
 
 Should show:
 ```
-✓ Database file found at: <path>
-✓ Database already contains state data
-✓ Database verification successful
-✅ Database initialization complete!
+Database file found at: <path>
+Database already contains state data
+Database verification successful
+Database initialization complete!
 ```
 
 ### Access the Frontend
@@ -383,4 +383,4 @@ Once setup is complete:
 
 ---
 
-**Ready to compete?** Start the arena and let the bots trade! 🚀
+**Ready to compete?** Start the arena and let the bots trade!

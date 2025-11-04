@@ -508,4 +508,4 @@ Similar process to AI providers:
 
 ---
 
-**Happy coding!** 🚀
+**Happy coding!**
