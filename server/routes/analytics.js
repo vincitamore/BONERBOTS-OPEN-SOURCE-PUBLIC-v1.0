@@ -12,6 +12,162 @@ const db = require('../database/relational');
 const router = express.Router();
 
 /**
+ * GET /api/analytics/performance - Get overall performance metrics across all bots
+ */
+router.get('/performance',
+  optionalAuth,
+  query('timeRange').optional().isIn(['24h', '7d', '30d', 'all']).withMessage('Invalid time range'),
+  validateRequest,
+  (req, res) => {
+    try {
+      const bots = db.getBots();
+      
+      if (bots.length === 0) {
+        return res.json({
+          totalPnL: 0,
+          totalPnLPercent: 0,
+          totalTrades: 0,
+          winRate: 0,
+          avgWin: 0,
+          avgLoss: 0,
+          sharpeRatio: 0,
+          maxDrawdown: 0
+        });
+      }
+      
+      // Calculate date range
+      const now = new Date();
+      let startDate = null;
+      if (req.query.timeRange === '24h') {
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      } else if (req.query.timeRange === '7d') {
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (req.query.timeRange === '30d') {
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+      
+      // Aggregate metrics across all bots
+      let totalPnL = 0;
+      let totalTrades = 0;
+      let totalWins = 0;
+      let allWins = [];
+      let allLosses = [];
+      let initialValue = 0;
+      let currentValue = 0;
+      
+      for (const bot of bots) {
+        const snapshots = db.getBotSnapshots(
+          bot.id,
+          startDate ? startDate.toISOString() : undefined,
+          undefined
+        );
+        
+        const trades = db.getTrades(bot.id, {
+          start_date: startDate ? startDate.toISOString() : undefined
+        });
+        
+        if (snapshots.length > 0) {
+          const latestSnapshot = snapshots[snapshots.length - 1];
+          totalPnL += latestSnapshot.realized_pnl || 0;
+          totalTrades += latestSnapshot.trade_count || 0;
+          totalWins += Math.round((latestSnapshot.trade_count || 0) * (latestSnapshot.win_rate || 0));
+          currentValue += latestSnapshot.total_value || 0;
+          initialValue += latestSnapshot.balance || 10000; // Fallback to default
+        }
+        
+        // Collect individual wins and losses
+        for (const trade of trades) {
+          if (trade.pnl > 0) {
+            allWins.push(trade.pnl);
+          } else if (trade.pnl < 0) {
+            allLosses.push(Math.abs(trade.pnl));
+          }
+        }
+      }
+      
+      const winRate = totalTrades > 0 ? (totalWins / totalTrades * 100) : 0;
+      const avgWin = allWins.length > 0 ? allWins.reduce((sum, w) => sum + w, 0) / allWins.length : 0;
+      const avgLoss = allLosses.length > 0 ? allLosses.reduce((sum, l) => sum + l, 0) / allLosses.length : 0;
+      const totalPnLPercent = initialValue > 0 ? (totalPnL / initialValue * 100) : 0;
+      
+      // Calculate Sharpe and max drawdown (simplified)
+      const sharpeRatio = 0; // TODO: Proper calculation requires time series
+      const maxDrawdown = 0; // TODO: Proper calculation requires time series
+      
+      res.json({
+        totalPnL: parseFloat(totalPnL.toFixed(2)),
+        totalPnLPercent: parseFloat(totalPnLPercent.toFixed(2)),
+        totalTrades: totalTrades,
+        winRate: parseFloat(winRate.toFixed(2)),
+        avgWin: parseFloat(avgWin.toFixed(2)),
+        avgLoss: parseFloat(avgLoss.toFixed(2)),
+        sharpeRatio: parseFloat(sharpeRatio.toFixed(2)),
+        maxDrawdown: parseFloat(maxDrawdown.toFixed(2))
+      });
+    } catch (error) {
+      console.error('Error fetching overall performance:', error);
+      res.status(500).json({ error: 'Failed to fetch performance', message: error.message });
+    }
+  }
+);
+
+/**
+ * GET /api/analytics/performance/:botId - Get performance metrics for specific bot
+ */
+router.get('/performance/:botId',
+  optionalAuth,
+  param('botId').notEmpty().withMessage('Bot ID is required'),
+  query('timeRange').optional().isIn(['24h', '7d', '30d', 'all']).withMessage('Invalid time range'),
+  validateRequest,
+  (req, res) => {
+    try {
+      const bot = db.getBot(req.params.botId);
+      if (!bot) {
+        return res.status(404).json({ error: 'Bot not found' });
+      }
+      
+      // Calculate date range
+      const now = new Date();
+      let startDate = null;
+      if (req.query.timeRange === '24h') {
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      } else if (req.query.timeRange === '7d') {
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (req.query.timeRange === '30d') {
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+      
+      const snapshots = db.getBotSnapshots(
+        req.params.botId,
+        startDate ? startDate.toISOString() : undefined,
+        undefined
+      );
+      
+      if (snapshots.length === 0) {
+        return res.json({
+          totalPnL: 0,
+          tradeCount: 0,
+          winRate: 0,
+          currentValue: 0
+        });
+      }
+      
+      const latestSnapshot = snapshots[snapshots.length - 1];
+      
+      res.json({
+        totalPnL: parseFloat((latestSnapshot.realized_pnl || 0).toFixed(2)),
+        tradeCount: latestSnapshot.trade_count || 0,
+        winRate: parseFloat(((latestSnapshot.win_rate || 0) * 100).toFixed(2)),
+        currentValue: parseFloat((latestSnapshot.total_value || 0).toFixed(2))
+      });
+    } catch (error) {
+      console.error('Error fetching bot performance:', error);
+      res.status(500).json({ error: 'Failed to fetch bot performance', message: error.message });
+    }
+  }
+);
+
+/**
  * GET /api/analytics/bot/:botId/performance - Get performance metrics for bot
  */
 router.get('/bot/:botId/performance',
