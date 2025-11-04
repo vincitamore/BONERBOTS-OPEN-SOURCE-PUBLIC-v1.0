@@ -9,12 +9,15 @@ const generateFullPrompt = (portfolio: Portfolio, marketData: Market[], baseProm
     ? portfolio.positions.map(p => ` - ID: ${p.id}, Symbol: ${p.symbol}, Type: ${p.type}, Size: $${p.size}, Leverage: ${p.leverage}x, Entry: $${p.entryPrice.toFixed(4)}, SL: $${p.stopLoss?.toFixed(4)}, TP: $${p.takeProfit?.toFixed(4)}`).join('\n')
     : 'None';
 
+  const currentDate = new Date().toUTCString();
+
   return basePrompt
     .replace('{{totalValue}}', portfolio.totalValue.toFixed(2))
     .replace('{{availableBalance}}', portfolio.balance.toFixed(2))
     .replace('{{unrealizedPnl}}', portfolio.pnl.toFixed(2))
     .replace('{{openPositions}}', formattedPositions)
-    .replace('{{marketData}}', formattedMarketData);
+    .replace('{{marketData}}', formattedMarketData)
+    .replace('{{currentDate}}', currentDate);
 };
 
 

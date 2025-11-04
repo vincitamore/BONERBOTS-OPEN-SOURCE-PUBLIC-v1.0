@@ -5,7 +5,7 @@ import { PAPER_BOT_INITIAL_BALANCE, LIVE_BOT_INITIAL_BALANCE, TURN_INTERVAL_MS, 
 import { getMarketData, executeTrade, getRealAccountState, placeRealOrder, setLeverage, getExchangeInfo, SymbolPrecisionInfo, getRealTradeHistory } from '../services/asterdexService';
 import { getTradingDecision } from '../services/geminiService';
 import { getGrokTradingDecision } from '../services/grokService';
-import { DEGEN_PROMPT, ESCAPED_MONKEY_PROMPT, ASTROLOGER_PROMPT } from '../prompts';
+import { DEGEN_PROMPT, ESCAPED_MONKEY_PROMPT, ASTROLOGER_PROMPT, TIME_TRAVELER_PROMPT } from '../prompts';
 import { getArenaState } from '../services/stateService';
 import { isAppConfigured } from '../config';
 import { leverageLimits } from '../leverageLimits';
@@ -58,6 +58,7 @@ const botConfigs: { id: string, name: string, prompt: string, provider: 'gemini'
     { id: 'bot_degen', name: 'DEGEN LIVE', prompt: DEGEN_PROMPT, provider: 'grok', mode: 'real' },
     { id: 'bot_monkey', name: 'Escaped Monkey', prompt: ESCAPED_MONKEY_PROMPT, provider: 'gemini', mode: 'real' },
     { id: 'bot_astrologer', name: 'Astrologer', prompt: ASTROLOGER_PROMPT, provider: 'gemini', mode: 'real' },
+    { id: 'bot_chronospeculator', name: 'The Chronospeculator', prompt: TIME_TRAVELER_PROMPT, provider: 'grok', mode: 'real' },
 ];
 
 const useTradingBots = (isGloballyPaused: boolean) => {

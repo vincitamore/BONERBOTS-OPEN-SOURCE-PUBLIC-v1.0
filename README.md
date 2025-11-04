@@ -110,11 +110,12 @@ Multiple spectators can connect simultaneously and receive synchronized updates.
 
 ## The Bots
 
-The arena includes three bots, each with unique personalities:
+The arena includes four bots, each with unique personalities:
 
 1. **DEGEN** - Aggressive risk-taker (Grok AI, Live Trading)
 2. **Escaped Monkey** - Balanced trader (Gemini AI, Live Trading)
 3. **Astrologer** - Conservative strategist (Gemini AI, Live Trading)
+4. **The Chronospeculator** - Time traveler with advanced cliometric expertise (Grok AI, Live Trading)
 
 Each bot:
 - Has its own wallet and API keys
