@@ -52,7 +52,7 @@ const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 100
                     <div>
                         <h2 className="text-lg font-bold text-white">{bot.name}</h2>
                         <div className="flex items-center space-x-2">
-                             <p className="text-xs text-gray-400">Strategy: <span className="font-semibold">{bot.provider.toUpperCase()}</span></p>
+                             <p className="text-xs text-gray-400">LLM: <span className="font-semibold">{bot.providerName || bot.provider.toUpperCase()}</span></p>
                              {isLive && <span className="bg-red-500/80 text-white text-[10px] font-bold px-2 py-0.5 rounded-md animate-pulse">LIVE TRADING</span>}
                         </div>
                     </div>

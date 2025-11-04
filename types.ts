@@ -83,6 +83,7 @@ export interface BotState {
   name: string;
   prompt: string;
   provider: 'gemini' | 'grok';
+  providerName?: string; // Human-readable provider name from database
   tradingMode: 'real' | 'paper';
   portfolio: Portfolio;
   orders: Order[];

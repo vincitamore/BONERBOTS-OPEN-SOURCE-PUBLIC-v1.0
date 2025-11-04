@@ -125,8 +125,8 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
             initialBalance={initialBalanceRef.current.get(bot.id) ?? (bot.tradingMode === 'real' ? LIVE_BOT_INITIAL_BALANCE : PAPER_BOT_INITIAL_BALANCE)}
             onOpenModal={(content) => handleOpenModal(bot, content)}
             onReset={() => resetBot(bot.id)}
-            onTogglePause={() => {}}
-            onForceTurn={() => {}}
+            onTogglePause={() => toggleBotPause(bot.id)}
+            onForceTurn={() => forceProcessTurn(bot.id)}
           />
         ))}
       </div>

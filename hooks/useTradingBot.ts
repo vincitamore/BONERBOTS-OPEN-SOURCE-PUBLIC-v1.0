@@ -35,13 +35,14 @@ interface ApiProvider {
 }
 
 // Helper to create a fresh bot state
-function createNewBot(id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real'): BotState {
+function createNewBot(id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', providerName?: string): BotState {
     const initialBalance = mode === 'real' ? LIVE_BOT_INITIAL_BALANCE : PAPER_BOT_INITIAL_BALANCE;
     return {
         id,
         name,
         prompt,
         provider,
+        providerName,
         tradingMode: mode,
         portfolio: {
             balance: initialBalance,
@@ -68,19 +69,20 @@ function createNewBot(id: string, name: string, prompt: string, provider: 'gemin
 }
 
 // Fetch bots and providers from API
-async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', isPaused: boolean }[]> {
+async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', isPaused: boolean, providerName?: string }[]> {
     try {
         const [botsResponse, providersResponse] = await Promise.all([
             axios.get<ApiBot[]>(`${API_BASE_URL}/api/v2/bots`),
             axios.get<ApiProvider[]>(`${API_BASE_URL}/api/v2/providers`)
         ]);
 
-        const providers = new Map(providersResponse.data.map(p => [p.id, p.provider_type]));
+        const providersMap = new Map(providersResponse.data.map(p => [p.id, { type: p.provider_type, name: p.name }]));
 
         return botsResponse.data
             .filter(bot => bot.is_active) // Only load active bots
             .map(bot => {
-                const providerType = providers.get(bot.provider_id);
+                const providerInfo = providersMap.get(bot.provider_id);
+                const providerType = providerInfo?.type;
                 // Default to 'gemini' if provider type is not gemini or grok
                 const provider = (providerType === 'gemini' || providerType === 'grok') ? providerType : 'gemini';
                 
@@ -89,6 +91,7 @@ async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: st
                     name: bot.name,
                     prompt: bot.prompt,
                     provider,
+                    providerName: providerInfo?.name, // Get provider name from database
                     mode: bot.trading_mode,
                     isPaused: bot.is_paused
                 };
@@ -162,20 +165,22 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 initialBots = savedState.bots.map(savedBot => {
                     const config = botConfigs.find(c => c.id === savedBot.id);
                     if (!config) return null;
-                    return {
+                    const botState: BotState = {
                         ...savedBot,
                         tradingMode: config.mode,
                         isPaused: config.isPaused, // Update pause state from database
+                        providerName: config.providerName, // Update provider name from database
                         symbolCooldowns: savedBot.symbolCooldowns || {},
-                        getDecision: (portfolio: Portfolio, marketData: Market[]) => {
-                            if (config.provider === 'grok') return getGrokTradingDecision(portfolio, marketData, config.prompt);
-                            return getTradingDecision(portfolio, marketData, config.prompt);
+                        getDecision: (portfolio: Portfolio, marketData: Market[], recentLogs?: BotLog[], cooldowns?: Record<string, number>, recentOrders?: Order[]) => {
+                            if (config.provider === 'grok') return getGrokTradingDecision(portfolio, marketData, config.prompt, recentLogs, cooldowns, recentOrders);
+                            return getTradingDecision(portfolio, marketData, config.prompt, recentLogs, cooldowns, recentOrders);
                         }
                     };
+                    return botState;
                 }).filter((bot): bot is BotState => bot !== null);
             } else {
                 console.log("No saved state found. Starting fresh simulation.");
-                initialBots = botConfigs.map(c => createNewBot(c.id, c.name, c.prompt, c.provider, c.mode));
+                initialBots = botConfigs.map(c => createNewBot(c.id, c.name, c.prompt, c.provider, c.mode, c.providerName));
                 // Set initial pause state from database
                 initialBots = initialBots.map(bot => {
                     const config = botConfigs.find(c => c.id === bot.id);
@@ -880,7 +885,19 @@ const useTradingBots = (isGloballyPaused: boolean) => {
         }
     };
 
-    return { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause: () => {}, forceProcessTurn: () => {}, initialBalanceRef };
+    const toggleBotPause = (botId: string) => {
+        setBots(current => current.map(b => 
+            b.id === botId ? { ...b, isPaused: !b.isPaused } : b
+        ));
+    };
+
+    const forceProcessTurn = async (botId?: string) => {
+        if (botFunctionsRef.current.runTradingTurn) {
+            await botFunctionsRef.current.runTradingTurn();
+        }
+    };
+
+    return { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause, forceProcessTurn, initialBalanceRef };
 };
 
 export default useTradingBots;
