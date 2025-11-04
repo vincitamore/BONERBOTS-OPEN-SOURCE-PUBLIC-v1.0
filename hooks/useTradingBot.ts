@@ -6,7 +6,8 @@ import { getMarketData, executeTrade, getRealAccountState, placeRealOrder, setLe
 import { getTradingDecision } from '../services/geminiService';
 import { getGrokTradingDecision } from '../services/grokService';
 import { DEGEN_PROMPT, ESCAPED_MONKEY_PROMPT, ASTROLOGER_PROMPT } from '../prompts';
-import { supabase, isAppConfigured } from '../services/supabaseClient';
+import { getArenaState } from '../services/stateService';
+import { isAppConfigured } from '../config';
 import { leverageLimits } from '../leverageLimits';
 
 const MINIMUM_TRADE_SIZE_USD = 50;
@@ -77,7 +78,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
 
     useEffect(() => {
         const initialize = async () => {
-            if (!isAppConfigured || !supabase) {
+            if (!isAppConfigured) {
                 setIsLoading(false);
                 return;
             }
@@ -85,12 +86,12 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             setSymbolPrecisions(precisions);
             console.log("Fetched symbol precisions:", precisions);
 
-            const { data, error } = await supabase.from('arena_state').select('state').single();
+            const savedState = await getArenaState();
             let initialBots: BotState[];
 
-            if (data && data.state && (data.state as ArenaState).bots?.length > 0) {
+            if (savedState && savedState.bots?.length > 0) {
                 console.log("Resuming from saved state.");
-                initialBots = (data.state as ArenaState).bots.map(savedBot => {
+                initialBots = savedState.bots.map(savedBot => {
                     const config = botConfigs.find(c => c.id === savedBot.id)!;
                     if (!config) return null;
                     return {
@@ -105,7 +106,6 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 }).filter((bot): bot is BotState => bot !== null);
             } else {
                 console.log("No saved state found. Starting fresh simulation.");
-                if (error) console.error("Error fetching initial state:", error.message);
                 initialBots = botConfigs.map(c => createNewBot(c.id, c.name, c.prompt, c.provider, c.mode));
             }
 

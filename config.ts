@@ -1,30 +1,27 @@
 // config.ts
 /**
- * The URL for the Cloudflare Worker proxy.
- * This is used to bypass CORS issues when calling third-party APIs from the browser.
- * Replace with your actual worker URL.
- * Example: 'https://my-worker.my-account.workers.dev'
+ * Configuration for the BONERBOTS AI Arena (Local Edition)
+ * 
+ * This application now runs on a local Express server instead of using
+ * Cloudflare Workers and Supabase. The configuration is much simpler.
  */
-export const PROXY_URL = 'PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE'; // IMPORTANT: SET YOUR PROXY URL HERE
 
 /**
- * Supabase URL for real-time data synchronization in spectator mode.
- * Get this from your Supabase project settings.
+ * The URL for the local Express API server.
+ * This can be overridden with the VITE_API_URL environment variable.
+ * Default: http://localhost:3001
  */
-export const SUPABASE_URL = 'PASTE_YOUR_SUPABASE_URL_HERE';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 /**
- * Supabase Anon Key for real-time data synchronization in spectator mode.
- * This is a public key and is safe to expose in the browser.
- * Get this from your Supabase project settings.
+ * The URL for the local WebSocket server (for real-time state updates).
+ * This can be overridden with the VITE_WS_URL environment variable.
+ * Default: ws://localhost:3002
  */
-export const SUPABASE_ANON_KEY = 'PASTE_YOUR_SUPABASE_ANON_KEY_HERE';
+export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
 
 /**
- * A flag that checks if all necessary environment variables are configured.
- * The application will show a warning if this is false.
+ * A flag that checks if the application is configured.
+ * For the local edition, this checks if the server URLs are set.
  */
-export const isAppConfigured = 
-  PROXY_URL && !PROXY_URL.includes('PASTE_YOUR') &&
-  SUPABASE_URL && !SUPABASE_URL.includes('PASTE_YOUR') &&
-  SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes('PASTE_YOUR');
+export const isAppConfigured = Boolean(API_URL && WS_URL);

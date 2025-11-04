@@ -1,5 +1,5 @@
 import { Portfolio, Market, AiDecision, AiAction } from "../types";
-import { PROXY_URL } from "../config";
+import { API_URL } from "../config";
 
 const generateFullPrompt = (portfolio: Portfolio, marketData: Market[], basePrompt: string): string => {
   const formattedMarketData = marketData.map(m => ` - ${m.symbol}: $${m.price.toFixed(4)} (24h change: ${m.price24hChange.toFixed(2)}%)`).join('\n');
@@ -21,11 +21,11 @@ const generateFullPrompt = (portfolio: Portfolio, marketData: Market[], baseProm
 export const getTradingDecision = async (portfolio: Portfolio, marketData: Market[], basePrompt: string): Promise<{ prompt: string, decisions: AiDecision[] }> => {
   const prompt = generateFullPrompt(portfolio, marketData, basePrompt);
 
-  if (!PROXY_URL) {
-    console.error("PROXY_URL is not configured in config.ts");
+  if (!API_URL) {
+    console.error("API_URL is not configured in config.ts");
     return { prompt, decisions: [] };
   }
-  const API_ENDPOINT = `${PROXY_URL}/gemini`;
+  const API_ENDPOINT = `${API_URL}/api/gemini`;
 
   try {
     const response = await fetch(API_ENDPOINT, {

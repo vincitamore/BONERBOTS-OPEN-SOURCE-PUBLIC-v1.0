@@ -1,15 +1,15 @@
 // services/asterdexService.ts
-import { PROXY_URL } from '../config';
+import { API_URL } from '../config';
 import { Market, OrderType, Position, Portfolio, Order } from '../types';
 import { TRADING_SYMBOLS } from '../constants';
 
-const API_ENDPOINT = `${PROXY_URL}/asterdex`;
-const TRADE_API_ENDPOINT = `${PROXY_URL}/aster/trade`;
-const EXCHANGE_INFO_ENDPOINT = `${PROXY_URL}/asterdex/exchangeInfo`;
+const ASTERDEX_ENDPOINT = `${API_URL}/api/asterdex`;
+const TRADE_API_ENDPOINT = `${API_URL}/api/aster/trade`;
+const EXCHANGE_INFO_ENDPOINT = `${API_URL}/api/asterdex/exchangeInfo`;
 
 // --- Generic API Caller for Authenticated Requests ---
 async function callTradeApi(method: 'GET' | 'POST', endpoint: string, botId: string, params: object = {}) {
-    if (!PROXY_URL) throw new Error("PROXY_URL is not configured.");
+    if (!API_URL) throw new Error("API_URL is not configured.");
     
     const response = await fetch(TRADE_API_ENDPOINT, {
         method: 'POST',
@@ -143,12 +143,12 @@ export const placeRealOrder = async (params: Record<string, any>, botId: string)
 // --- Public/Simulated Functions ---
 
 export const getMarketData = async (): Promise<Market[]> => {
-  if (!PROXY_URL) {
-    console.error("PROXY_URL is not configured in config.ts");
+  if (!API_URL) {
+    console.error("API_URL is not configured in config.ts");
     return [];
   }
   try {
-    const response = await fetch(API_ENDPOINT);
+    const response = await fetch(ASTERDEX_ENDPOINT);
     if (!response.ok) throw new Error(`Failed to fetch market data: ${response.statusText}`);
     const data = await response.json();
     return data

@@ -1,5 +1,6 @@
 // components/ConfigurationWarning.tsx
 import React from 'react';
+import { API_URL, WS_URL } from '../config';
 
 const ConfigurationWarning: React.FC = () => {
   return (
@@ -10,31 +11,29 @@ const ConfigurationWarning: React.FC = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-yellow-400">Configuration Required</h1>
+        <h1 className="text-3xl font-bold text-yellow-400">Server Not Running</h1>
         <p className="text-lg text-gray-300">
-          Welcome to the BONERBOTS AI Arena! Before the simulation can begin, you need to provide some essential configuration.
+          Welcome to the BONERBOTS AI Arena (Local Edition)! The application cannot connect to the backend server.
         </p>
-        <div className="text-left bg-gray-900/70 p-4 rounded-md border border-gray-700">
-          <p className="font-semibold text-white">You must edit the <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">config.ts</code> file in the project's root directory and provide the following:</p>
-          <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
-            <li>Your Cloudflare Worker Proxy URL</li>
-            <li>Your Supabase Project URL</li>
-            <li>Your Supabase Public Anon Key</li>
+        <div className="text-left bg-gray-900/70 p-4 rounded-md border border-gray-700 space-y-3">
+          <p className="font-semibold text-white">Please ensure the following:</p>
+          <ul className="list-disc list-inside space-y-2 text-gray-400">
+            <li>The backend server is running (from the <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">server/</code> directory)</li>
+            <li>Server is accessible at: <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">{API_URL}</code></li>
+            <li>WebSocket server at: <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">{WS_URL}</code></li>
           </ul>
         </div>
-        <p className="text-gray-400">
-          These values are required to connect to the necessary APIs and the real-time data service.
-        </p>
-        <div>
-          <a
-            href="https://github.com/bonerjams/bonerbots-ai-dashboard/blob/main/README.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block px-6 py-3 font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            Read the Setup Guide
-          </a>
+        <div className="text-left bg-gray-900/70 p-4 rounded-md border border-gray-700 space-y-2">
+          <p className="font-semibold text-white">Quick Start:</p>
+          <ol className="list-decimal list-inside space-y-1 text-gray-400">
+            <li>Configure API keys in <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">server/.env</code></li>
+            <li>Install dependencies: <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">cd server && pnpm install</code></li>
+            <li>Start the server: <code className="bg-gray-700 text-indigo-300 px-2 py-1 rounded">pnpm start</code></li>
+          </ol>
         </div>
+        <p className="text-gray-400">
+          See the <strong>SETUP.md</strong> file for detailed installation instructions.
+        </p>
       </div>
     </div>
   );

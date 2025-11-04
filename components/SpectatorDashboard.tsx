@@ -12,7 +12,6 @@ import PositionsTable from './PositionsTable';
 import OrderHistory from './OrderHistory';
 import BotStatus from './BotStatus';
 import InfoPane from './InfoPane';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 import { LIVE_BOT_INITIAL_BALANCE, PAPER_BOT_INITIAL_BALANCE } from '../constants';
 
 // Fix: Defined a local state type to accurately represent the hydrated data used for rendering.
@@ -30,8 +29,6 @@ const SpectatorDashboard: React.FC = () => {
   const [modalContent, setModalContent] = useState<ModalContentType | null>(null);
 
   useEffect(() => {
-    let channel: RealtimeChannel | null = null;
-    
     const handleStateChange = (newState: ArenaState) => {
       // Fix: Correctly transform the serializable bot data from the network into the full
       // BotState required by components. A dummy 'getDecision' function is added to satisfy
@@ -47,12 +44,12 @@ const SpectatorDashboard: React.FC = () => {
       setArenaState(hydratedState);
     };
 
-    channel = subscribeToStateChanges(handleStateChange);
+    // Subscribe to WebSocket state changes
+    const unsubscribe = subscribeToStateChanges(handleStateChange);
 
+    // Cleanup on unmount
     return () => {
-      if (channel) {
-        channel.unsubscribe();
-      }
+      unsubscribe();
     };
   }, []);
 

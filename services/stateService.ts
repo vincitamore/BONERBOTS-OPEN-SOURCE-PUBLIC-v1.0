@@ -1,47 +1,68 @@
 // services/stateService.ts
-import { supabase, isAppConfigured } from './supabaseClient';
-// Fix: Imported BotState and SerializableBotState for type correctness.
+import { wsService } from './websocketService';
 import { ArenaState } from '../types';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { API_URL } from '../config';
 
-const CHANNEL_NAME = 'arena-state';
-const EVENT_NAME = 'broadcast';
-
-let channel: RealtimeChannel | null = null;
-
-export const updateState = async (newState: ArenaState) => {
-  if (!isAppConfigured || !supabase) return;
-  if (!channel) {
-    channel = supabase.channel(CHANNEL_NAME);
-  }
-  
+/**
+ * Update the arena state (Broadcast mode only)
+ * This sends the state to the server, which persists it and broadcasts to spectators
+ */
+export const updateState = async (newState: ArenaState): Promise<void> => {
   try {
-    channel.send({
-      type: 'broadcast',
-      event: EVENT_NAME,
-      payload: newState,
+    const response = await fetch(`${API_URL}/api/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newState)
     });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    console.log(`State updated and broadcasted to ${result.clients} clients`);
   } catch (error) {
-    console.error('Error broadcasting state to Supabase:', error);
+    console.error('Error updating state:', error);
+    throw error;
   }
 };
 
-export const subscribeToStateChanges = (callback: (newState: ArenaState) => void): RealtimeChannel | null => {
-  if (!isAppConfigured || !supabase) return null;
+/**
+ * Subscribe to state changes (Spectator mode)
+ * Returns an unsubscribe function
+ */
+export const subscribeToStateChanges = (callback: (newState: ArenaState) => void): (() => void) => {
+  // Connect to WebSocket if not already connected
+  if (!wsService.isConnected()) {
+    wsService.connect();
+  }
   
-  const stateChannel = supabase
-    .channel(CHANNEL_NAME)
-    .on('broadcast', { event: EVENT_NAME }, ({ payload }) => {
-      callback(payload);
-    })
-    .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-            console.log('Successfully subscribed to arena state updates.');
-        }
-        if (status === 'CHANNEL_ERROR') {
-            console.error('Error subscribing to arena state updates.');
-        }
-    });
+  // Subscribe to state updates
+  wsService.subscribe('state_update', callback);
+  
+  // Return unsubscribe function
+  return () => {
+    wsService.unsubscribe('state_update', callback);
+  };
+};
 
-  return stateChannel;
+/**
+ * Get the current arena state from the server
+ */
+export const getArenaState = async (): Promise<ArenaState | null> => {
+  try {
+    const response = await fetch(`${API_URL}/api/state`);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null; // No state exists yet
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching arena state:', error);
+    return null;
+  }
 };

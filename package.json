@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "cd server && pnpm run dev",
+    "dev:all": "concurrently \"pnpm run dev:server\" \"pnpm run dev\" --names \"SERVER,CLIENT\" --prefix-colors \"blue,green\"",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build:server": "cd server && pnpm install --prod",
+    "preview": "vite preview",
+    "setup": "cd server && pnpm install && pnpm run db:init && cd .. && pnpm install"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
     "lightweight-charts": "^4.1.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -21,6 +24,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
+    "concurrently": "^9.1.0",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.7",
     "typescript": "^5.5.4",

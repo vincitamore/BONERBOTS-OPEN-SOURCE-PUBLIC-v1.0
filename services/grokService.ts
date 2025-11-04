@@ -1,5 +1,5 @@
 import { Portfolio, Market, AiDecision, AiAction } from "../types";
-import { PROXY_URL } from "../config";
+import { API_URL } from "../config";
 
 const MODEL = 'grok-3-mini-beta';
 
@@ -21,11 +21,11 @@ const generateFullPrompt = (portfolio: Portfolio, marketData: Market[], baseProm
 export const getGrokTradingDecision = async (portfolio: Portfolio, marketData: Market[], basePrompt: string): Promise<{ prompt: string, decisions: AiDecision[] }> => {
   const prompt = generateFullPrompt(portfolio, marketData, basePrompt);
 
-  if (!PROXY_URL) {
-    console.error("PROXY_URL is not configured in config.ts");
+  if (!API_URL) {
+    console.error("API_URL is not configured in config.ts");
     return { prompt, decisions: [] };
   }
-  const API_ENDPOINT = `${PROXY_URL}/grok`;
+  const API_ENDPOINT = `${API_URL}/api/grok`;
 
   try {
     const response = await fetch(API_ENDPOINT, {
