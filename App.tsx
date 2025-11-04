@@ -13,6 +13,8 @@ import { BotEditorPage } from './pages/config/BotEditorPage';
 import { ProvidersPage } from './pages/config/ProvidersPage';
 import { SettingsPage } from './pages/config/SettingsPage';
 import { CredentialsPage } from './pages/config/CredentialsPage';
+import { AnalyticsPage } from './pages/analytics/AnalyticsPage';
+import { BotDeepDivePage } from './pages/analytics/BotDeepDivePage';
 import { AppMode } from './types';
 import { isAppConfigured } from './config';
 
@@ -40,6 +42,9 @@ const Navigation: React.FC = () => {
           <div className="flex items-center gap-2 overflow-x-auto">
             <Link to="/dashboard" className={navLinkClass('/dashboard')}>
               Dashboard
+            </Link>
+            <Link to="/analytics" className={navLinkClass('/analytics')}>
+              Analytics
             </Link>
             <Link to="/config/bots" className={navLinkClass('/config/bots')}>
               Bots
@@ -150,6 +155,18 @@ const AuthenticatedApp: React.FC = () => {
         <Route path="/dashboard" element={
           <AppLayout>
             <DashboardRoutes />
+          </AppLayout>
+        } />
+
+        {/* Analytics Routes */}
+        <Route path="/analytics" element={
+          <AppLayout>
+            <AnalyticsPage />
+          </AppLayout>
+        } />
+        <Route path="/analytics/bot/:botId" element={
+          <AppLayout>
+            <BotDeepDivePage />
           </AppLayout>
         } />
 
