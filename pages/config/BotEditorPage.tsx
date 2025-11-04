@@ -26,10 +26,12 @@ export const BotEditorPage: React.FC = () => {
     prompt: '',
     provider_id: '',
     trading_mode: 'paper' as 'paper' | 'real',
+    avatar_image: null as string | null,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
   // Load existing bot data in edit mode
   useEffect(() => {
@@ -40,9 +42,45 @@ export const BotEditorPage: React.FC = () => {
         prompt: existingBot.prompt,
         provider_id: existingBot.provider_id.toString(),
         trading_mode: existingBot.trading_mode,
+        avatar_image: existingBot.avatar_image || null,
       });
+      setAvatarPreview(existingBot.avatar_image || null);
     }
   }, [isEditMode, existingBot]);
+
+  // Handle avatar image upload
+  const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setErrors({ ...errors, avatar_image: 'Please select a valid image file' });
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setErrors({ ...errors, avatar_image: 'Image must be smaller than 2MB' });
+      return;
+    }
+
+    // Convert to base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      setFormData({ ...formData, avatar_image: base64String });
+      setAvatarPreview(base64String);
+      setErrors({ ...errors, avatar_image: '' });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Clear avatar
+  const handleClearAvatar = () => {
+    setFormData({ ...formData, avatar_image: null });
+    setAvatarPreview(null);
+  };
 
   // Validation
   const validate = (): boolean => {
@@ -93,6 +131,7 @@ export const BotEditorPage: React.FC = () => {
           prompt: formData.prompt,
           provider_id: parseInt(formData.provider_id),
           trading_mode: formData.trading_mode,
+          avatar_image: formData.avatar_image,
         });
       } else {
         await createBot({
@@ -101,6 +140,7 @@ export const BotEditorPage: React.FC = () => {
           prompt: formData.prompt,
           provider_id: parseInt(formData.provider_id),
           trading_mode: formData.trading_mode,
+          avatar_image: formData.avatar_image,
         });
       }
 
@@ -195,6 +235,65 @@ export const BotEditorPage: React.FC = () => {
             required
             helperText="Display name for this bot (1-100 characters)"
           />
+
+          {/* Avatar Upload */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-200">
+              Bot Avatar
+            </label>
+            <div className="flex items-start gap-4">
+              {/* Preview */}
+              <div className="flex-shrink-0">
+                {avatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt="Avatar preview"
+                    className="w-24 h-24 rounded-full border-2 border-gray-600 object-cover"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-full border-2 border-gray-600 bg-gray-700 flex items-center justify-center text-gray-400">
+                    <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+
+              {/* Upload Controls */}
+              <div className="flex-1 space-y-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarUpload}
+                  className="hidden"
+                  id="avatar-upload"
+                />
+                <div className="flex gap-2">
+                  <label
+                    htmlFor="avatar-upload"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium cursor-pointer transition-colors inline-block"
+                  >
+                    {avatarPreview ? 'Change Avatar' : 'Upload Avatar'}
+                  </label>
+                  {avatarPreview && (
+                    <button
+                      type="button"
+                      onClick={handleClearAvatar}
+                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg font-medium transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">
+                  Optional. Upload a custom avatar image (max 2MB, JPG/PNG/GIF). If not provided, a default avatar will be used.
+                </p>
+                {errors.avatar_image && (
+                  <p className="text-xs text-red-400">{errors.avatar_image}</p>
+                )}
+              </div>
+            </div>
+          </div>
 
           <SelectDropdown
             label="Trading Mode"

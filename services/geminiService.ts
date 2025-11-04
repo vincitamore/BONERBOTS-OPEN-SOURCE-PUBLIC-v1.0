@@ -102,10 +102,10 @@ export const getTradingDecision = async (portfolio: Portfolio, marketData: Marke
     }
 
     try {
-      const decisions: AiDecision[] = JSON.parse(decisionText);
-      const validDecisions = decisions.filter(d => d.action !== AiAction.HOLD);
+    const decisions: AiDecision[] = JSON.parse(decisionText);
+    const validDecisions = decisions.filter(d => d.action !== AiAction.HOLD);
       console.log(`✅ Gemini parsed successfully: ${decisions.length} total, ${validDecisions.length} valid`);
-      return { prompt, decisions: validDecisions };
+    return { prompt, decisions: validDecisions };
     } catch (parseError) {
       console.error('❌ Failed to parse Gemini JSON response:', parseError);
       console.error('Raw response:', decisionText);

@@ -36,19 +36,22 @@ const getPnlColor = (value: number) => {
 };
 
 const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 10000, onOpenModal, onTogglePause, onForceTurn, onReset }) => {
-    const { portfolio, realizedPnl, winRate, tradeCount, isPaused, tradingMode } = bot;
+    const { portfolio, realizedPnl, winRate, tradeCount, isPaused, tradingMode, avatarUrl } = bot;
     const { totalValue, balance, pnl: unrealizedPnl } = portfolio;
     const isLive = tradingMode === 'real';
 
     const totalPnl = realizedPnl + unrealizedPnl;
     const totalPnlPercent = initialBalance > 0 ? ((totalValue - initialBalance) / initialBalance) * 100 : 0;
     
+    // Use database avatar if available, otherwise fall back to hardcoded map
+    const avatarSrc = avatarUrl || botImageMap[bot.name] || `https://robohash.org/${bot.id}.png?set=set1&size=200x200`;
+    
     return (
         <div className={`bg-gray-800/50 rounded-xl shadow-2xl border-2 ${isPaused ? 'border-yellow-500' : (isLive ? 'border-red-500' : botColorMap[bot.name] || 'border-gray-700')} p-4 space-y-3 flex flex-col`}>
             {/* Header */}
             <div className="flex items-start justify-between">
                 <div className="flex items-center space-x-3">
-                    <img src={botImageMap[bot.name]} alt={bot.name} className="w-12 h-12 rounded-full border-2 border-gray-600" />
+                    <img src={avatarSrc} alt={bot.name} className="w-12 h-12 rounded-full border-2 border-gray-600 object-cover" />
                     <div>
                         <h2 className="text-lg font-bold text-white">{bot.name}</h2>
                         <div className="flex items-center space-x-2">

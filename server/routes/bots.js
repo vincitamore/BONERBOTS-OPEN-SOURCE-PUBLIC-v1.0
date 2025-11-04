@@ -95,6 +95,7 @@ router.post('/',
   body('trading_mode').isIn(['paper', 'real']).withMessage('Trading mode must be paper or real'),
   body('is_active').optional().isBoolean().withMessage('is_active must be boolean'),
   body('is_paused').optional().isBoolean().withMessage('is_paused must be boolean'),
+  body('avatar_image').optional().isString().withMessage('avatar_image must be a string'),
   validateRequest,
   (req, res) => {
     try {
@@ -151,6 +152,7 @@ router.put('/:id',
   body('trading_mode').optional().isIn(['paper', 'real']).withMessage('Trading mode must be paper or real'),
   body('is_active').optional().isBoolean().withMessage('is_active must be boolean'),
   body('is_paused').optional().isBoolean().withMessage('is_paused must be boolean'),
+  body('avatar_image').optional().isString().withMessage('avatar_image must be a string'),
   validateRequest,
   (req, res) => {
     try {

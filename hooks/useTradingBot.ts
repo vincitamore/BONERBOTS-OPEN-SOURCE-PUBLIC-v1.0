@@ -25,6 +25,7 @@ interface ApiBot {
     trading_mode: 'paper' | 'real';
     is_active: boolean;
     is_paused: boolean;
+    avatar_image?: string | null;
 }
 
 // Type for API Provider response
@@ -35,7 +36,7 @@ interface ApiProvider {
 }
 
 // Helper to create a fresh bot state
-function createNewBot(id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', providerName?: string): BotState {
+function createNewBot(id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', providerName?: string, avatarUrl?: string | null): BotState {
     const initialBalance = mode === 'real' ? LIVE_BOT_INITIAL_BALANCE : PAPER_BOT_INITIAL_BALANCE;
     return {
         id,
@@ -43,6 +44,7 @@ function createNewBot(id: string, name: string, prompt: string, provider: 'gemin
         prompt,
         provider,
         providerName,
+        avatarUrl,
         tradingMode: mode,
         portfolio: {
             balance: initialBalance,
@@ -69,7 +71,7 @@ function createNewBot(id: string, name: string, prompt: string, provider: 'gemin
 }
 
 // Fetch bots and providers from API
-async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', isPaused: boolean, providerName?: string }[]> {
+async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', isPaused: boolean, providerName?: string, avatarUrl?: string | null }[]> {
     try {
         const [botsResponse, providersResponse] = await Promise.all([
             axios.get<ApiBot[]>(`${API_BASE_URL}/api/v2/bots`),
@@ -93,7 +95,8 @@ async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: st
                     provider,
                     providerName: providerInfo?.name, // Get provider name from database
                     mode: bot.trading_mode,
-                    isPaused: bot.is_paused
+                    isPaused: bot.is_paused,
+                    avatarUrl: bot.avatar_image
                 };
             });
     } catch (error) {
@@ -180,7 +183,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
                 }).filter((bot): bot is BotState => bot !== null);
             } else {
                 console.log("No saved state found. Starting fresh simulation.");
-                initialBots = botConfigs.map(c => createNewBot(c.id, c.name, c.prompt, c.provider, c.mode, c.providerName));
+                initialBots = botConfigs.map(c => createNewBot(c.id, c.name, c.prompt, c.provider, c.mode, c.providerName, c.avatarUrl));
                 // Set initial pause state from database
                 initialBots = initialBots.map(bot => {
                     const config = botConfigs.find(c => c.id === bot.id);

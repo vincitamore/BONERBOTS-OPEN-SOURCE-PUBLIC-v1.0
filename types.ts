@@ -84,6 +84,7 @@ export interface BotState {
   prompt: string;
   provider: 'gemini' | 'grok';
   providerName?: string; // Human-readable provider name from database
+  avatarUrl?: string | null; // Base64 encoded image or URL from database
   tradingMode: 'real' | 'paper';
   portfolio: Portfolio;
   orders: Order[];

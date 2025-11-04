@@ -82,8 +82,8 @@ function getBot(botId) {
  */
 function createBot(botData) {
   const stmt = db.prepare(`
-    INSERT INTO bots (id, name, prompt, provider_id, trading_mode, is_active, is_paused)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bots (id, name, prompt, provider_id, trading_mode, is_active, is_paused, avatar_image)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   stmt.run(
@@ -93,7 +93,8 @@ function createBot(botData) {
     botData.provider_id,
     botData.trading_mode,
     botData.is_active !== undefined ? (botData.is_active ? 1 : 0) : 1,
-    botData.is_paused !== undefined ? (botData.is_paused ? 1 : 0) : 0
+    botData.is_paused !== undefined ? (botData.is_paused ? 1 : 0) : 0,
+    botData.avatar_image || null
   );
   
   return getBot(botData.id);
@@ -103,7 +104,7 @@ function createBot(botData) {
  * Update a bot
  */
 function updateBot(botId, updates) {
-  const allowedFields = ['name', 'prompt', 'provider_id', 'trading_mode', 'is_active', 'is_paused'];
+  const allowedFields = ['name', 'prompt', 'provider_id', 'trading_mode', 'is_active', 'is_paused', 'avatar_image'];
   const setters = [];
   const params = [];
   

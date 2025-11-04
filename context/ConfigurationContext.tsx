@@ -26,6 +26,7 @@ export interface Bot {
   trading_mode: 'paper' | 'real';
   is_active: boolean;
   is_paused: boolean;
+  avatar_image?: string | null; // Base64 encoded image
   created_at: string;
   updated_at: string;
 }
