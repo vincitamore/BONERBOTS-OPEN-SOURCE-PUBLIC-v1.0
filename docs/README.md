@@ -10,6 +10,7 @@ This directory contains all project documentation, implementation summaries, and
 - **[DEVELOPMENT.md](./DEVELOPMENT.md)** - Development workflows and best practices
 
 ### **Architecture & Implementation**
+- **[MULTI_TENANT_ARENA_IMPLEMENTATION_PLAN.md](./MULTI_TENANT_ARENA_IMPLEMENTATION_PLAN.md)** 🎯 **NEW** - Complete plan for multi-user arena (Nov 2025)
 - **[ARCHITECTURAL_CLEANUP.md](./ARCHITECTURAL_CLEANUP.md)** ⭐ - Database-driven architecture guide (Nov 2025)
 - **[IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md)** - Planned features and roadmap
 - **[REFACTOR_SUMMARY.md](./REFACTOR_SUMMARY.md)** - Major refactoring changes
