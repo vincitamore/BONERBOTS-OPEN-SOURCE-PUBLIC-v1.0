@@ -11,6 +11,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { getApiBaseUrl } from '../utils/apiConfig';
 
 // ============================================================================
 // TYPES
@@ -119,7 +120,7 @@ const ConfigurationContext = createContext<ConfigurationContextType | undefined>
 // API BASE URL
 // ============================================================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE_URL = getApiBaseUrl();
 const API_BASE = `${API_BASE_URL}/api/v2`;
 
 // ============================================================================

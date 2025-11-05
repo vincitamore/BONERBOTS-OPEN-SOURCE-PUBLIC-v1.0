@@ -5,8 +5,9 @@ import { StatCard } from '../../components/analytics/StatCard';
 import { TimeSeriesChart } from '../../components/charts/TimeSeriesChart';
 import { BarChart } from '../../components/charts/BarChart';
 import axios from 'axios';
+import { getApiBaseUrl } from '../../utils/apiConfig';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE_URL = getApiBaseUrl();
 
 interface BotDetails {
   id: string;

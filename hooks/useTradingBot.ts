@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { BotState, Market, ArenaState } from '../types';
 import { subscribeToStateChanges } from '../services/stateService';
+import { getApiBaseUrl } from '../utils/apiConfig';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE_URL = getApiBaseUrl();
 
 const useTradingBots = (isGloballyPaused: boolean) => {
     const [bots, setBots] = useState<BotState[]>([]);
