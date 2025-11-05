@@ -1,7 +1,6 @@
 // components/SpectatorDashboard.tsx
 import React, { useState, useEffect } from 'react';
-// Fix: Imported Market type to define the component's state accurately.
-import { ArenaState, BotState, ModalContentType, Market } from '../types';
+import { ArenaState, SerializableBotState, ModalContentType, Market } from '../types';
 import { subscribeToStateChanges } from '../services/stateService';
 import MarketPrices from './MarketPrices';
 import PerformanceChart from './PerformanceChart';
@@ -13,34 +12,27 @@ import OrderHistory from './OrderHistory';
 import BotStatus from './BotStatus';
 import InfoPane from './InfoPane';
 
-// Fix: Defined a local state type to accurately represent the hydrated data used for rendering.
-// The network sends SerializableBotState, but components require the full BotState.
 interface SpectatorDisplayState {
-  bots: BotState[];
+  bots: SerializableBotState[];
   marketData: Market[];
 }
 
 const SpectatorDashboard: React.FC = () => {
-  // Fix: Used the correct local state type which contains the fully-typed BotState objects.
   const [arenaState, setArenaState] = useState<SpectatorDisplayState | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedBot, setSelectedBot] = useState<BotState | null>(null);
+  const [selectedBot, setSelectedBot] = useState<SerializableBotState | null>(null);
   const [modalContent, setModalContent] = useState<ModalContentType | null>(null);
 
   useEffect(() => {
     const handleStateChange = (newState: ArenaState) => {
-      // Fix: Correctly transform the serializable bot data from the network into the full
-      // BotState required by components. A dummy 'getDecision' function is added to satisfy
-      // the type, which is safe because it is never called in spectator mode. This resolves the type mismatch errors.
-      const hydratedState: SpectatorDisplayState = {
+      const displayState: SpectatorDisplayState = {
         bots: (newState.bots || []).map((bot) => ({
           ...bot,
           symbolCooldowns: bot.symbolCooldowns || {},
-          getDecision: async () => ({ prompt: '', decisions: [] }),
         })),
         marketData: newState.marketData || [],
       };
-      setArenaState(hydratedState);
+      setArenaState(displayState);
     };
 
     // Subscribe to WebSocket state changes
@@ -52,7 +44,7 @@ const SpectatorDashboard: React.FC = () => {
     };
   }, []);
 
-  const handleOpenModal = (bot: BotState, content: ModalContentType) => {
+  const handleOpenModal = (bot: SerializableBotState, content: ModalContentType) => {
     setSelectedBot(bot);
     setModalContent(content);
     setIsModalOpen(true);

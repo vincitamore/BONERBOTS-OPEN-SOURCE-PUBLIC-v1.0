@@ -1,13 +1,13 @@
 // components/BotCard.tsx
 import React from 'react';
-import { BotState, AppMode, ModalContentType } from '../types';
+import { SerializableBotState, AppMode, ModalContentType } from '../types';
 import PlayIcon from './icons/PlayIcon';
 import PauseIcon from './icons/PauseIcon';
 import RefreshIcon from './icons/RefreshIcon';
 import ResetIcon from './icons/ResetIcon';
 
 interface BotCardProps {
-  bot: BotState;
+  bot: SerializableBotState;
   rank: number;
   mode: AppMode;
   initialBalance?: number;

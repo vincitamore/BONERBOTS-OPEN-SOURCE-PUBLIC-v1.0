@@ -10,7 +10,7 @@ import PositionsTable from './PositionsTable';
 import OrderHistory from './OrderHistory';
 import BotStatus from './BotStatus';
 import InfoPane from './InfoPane';
-import { BotState, ModalContentType } from '../types';
+import { SerializableBotState, ModalContentType } from '../types';
 
 interface DashboardProps {
   isPaused: boolean;
@@ -21,7 +21,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
   const { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause, forceProcessTurn, initialBalanceRef } = useTradingBots(isPaused);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedBot, setSelectedBot] = useState<BotState | null>(null);
+  const [selectedBot, setSelectedBot] = useState<SerializableBotState | null>(null);
   const [modalContent, setModalContent] = useState<ModalContentType | null>(null);
 
   useEffect(() => {
@@ -29,7 +29,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
     onBroadcastingChange(!isLoading && bots.length > 0);
   }, [isLoading, bots, onBroadcastingChange]);
 
-  const handleOpenModal = (bot: BotState, content: ModalContentType) => {
+  const handleOpenModal = (bot: SerializableBotState, content: ModalContentType) => {
     setSelectedBot(bot);
     setModalContent(content);
     setIsModalOpen(true);

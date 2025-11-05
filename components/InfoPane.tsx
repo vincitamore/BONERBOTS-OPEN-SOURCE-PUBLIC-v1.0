@@ -1,9 +1,9 @@
 // components/InfoPane.tsx
 import React, { useState } from 'react';
-import { BotState } from '../types';
+import { SerializableBotState } from '../types';
 
 interface InfoPaneProps {
-  bot: BotState;
+  bot: SerializableBotState;
 }
 
 const InfoPane: React.FC<InfoPaneProps> = ({ bot }) => {

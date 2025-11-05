@@ -2,14 +2,14 @@
 // REFACTORED: Frontend is now a passive viewer that displays server-managed state
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import { BotState, Market, ArenaState } from '../types';
+import { SerializableBotState, Market, ArenaState } from '../types';
 import { subscribeToStateChanges } from '../services/stateService';
 import { getApiBaseUrl } from '../utils/apiConfig';
 
 const API_BASE_URL = getApiBaseUrl();
 
 const useTradingBots = (isGloballyPaused: boolean) => {
-    const [bots, setBots] = useState<BotState[]>([]);
+    const [bots, setBots] = useState<SerializableBotState[]>([]);
     const [markets, setMarkets] = useState<Market[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const initialBalanceRef = useRef<Map<string, number>>(new Map());

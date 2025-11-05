@@ -1,10 +1,10 @@
 
 
 import React from 'react';
-import { BotState } from '../types';
+import { SerializableBotState } from '../types';
 
 interface BotThoughtsTickerProps {
-  bots: BotState[];
+  bots: SerializableBotState[];
 }
 
 const BotThoughtsTicker: React.FC<BotThoughtsTickerProps> = ({ bots }) => {

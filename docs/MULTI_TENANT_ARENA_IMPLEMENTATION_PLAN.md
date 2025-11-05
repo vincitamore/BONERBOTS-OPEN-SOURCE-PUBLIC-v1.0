@@ -28,11 +28,10 @@ Transform BONERBOTS from a single-user local application into a secure, multi-te
 -- Users table
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    recovery_phrase_hash TEXT NOT NULL, -- Hashed 12-word recovery phrase
     role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin', 'moderator')),
-    email_verified INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME,
@@ -109,14 +108,19 @@ CREATE INDEX idx_trade_history_user ON trade_history(user_id);
 **Key Functions**:
 - `hashPassword(password)` - bcrypt with salt rounds 12
 - `verifyPassword(password, hash)` - constant-time comparison
+- `generateRecoveryPhrase()` - Generate 12-word BIP39 mnemonic phrase
+- `hashRecoveryPhrase(phrase)` - bcrypt hash of recovery phrase
+- `verifyRecoveryPhrase(phrase, hash)` - constant-time comparison
 - `generateTokens(userId)` - JWT access (15min) + refresh (7 days)
 - `verifyAccessToken(token)` - validate and decode JWT
 - `refreshAccessToken(refreshToken)` - rotate tokens
-- `createUser(email, username, password)` - registration
-- `authenticateUser(email, password)` - login
+- `createUser(username, password)` - registration, returns recovery phrase
+- `authenticateUser(username, password)` - login
+- `recoverAccount(username, recoveryPhrase)` - account recovery
+- `resetPassword(username, recoveryPhrase, newPassword)` - password reset
 - `revokeSession(sessionId)` - logout
 
-**Dependencies**: `jsonwebtoken`, `bcryptjs`
+**Dependencies**: `jsonwebtoken`, `bcryptjs`, `bip39` (for recovery phrases)
 
 ### 1.4 Auth Middleware
 **File**: `server/middleware/auth.js` (enhance existing)
@@ -155,14 +159,15 @@ const requireOwnership = (resourceType) => async (req, res, next) => {
 **File**: `server/routes/auth.js`
 
 **Endpoints**:
-- `POST /api/auth/register` - Create account
-- `POST /api/auth/login` - Authenticate
+- `POST /api/auth/register` - Create account (returns recovery phrase)
+- `POST /api/auth/login` - Authenticate with username/password
 - `POST /api/auth/refresh` - Refresh access token
 - `POST /api/auth/logout` - Revoke session
 - `GET /api/auth/me` - Current user info
 - `PUT /api/auth/me` - Update profile
-- `PUT /api/auth/password` - Change password
-- `POST /api/auth/verify-email` - Email verification (future)
+- `POST /api/auth/recover` - Verify recovery phrase
+- `POST /api/auth/reset-password` - Reset password using recovery phrase
+- `PUT /api/auth/password` - Change password (requires current password)
 
 ### 1.6 Update All Routes with Auth
 **Files**: `server/routes/*.js`
@@ -190,9 +195,11 @@ router.get('/api/bots', requireAuth, async (req, res) => {
 ```typescript
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<string>; // Returns recovery phrase
   logout: () => Promise<void>;
+  recoverAccount: (username: string, recoveryPhrase: string) => Promise<void>;
+  resetPassword: (username: string, recoveryPhrase: string, newPassword: string) => Promise<void>;
   isAuthenticated: boolean;
   isAdmin: boolean;
 }
@@ -204,13 +211,25 @@ Store tokens in `localStorage`, handle token refresh automatically.
 **Files**:
 - `pages/LoginPage.tsx` (enhance existing)
 - `pages/RegisterPage.tsx` (new)
+- `pages/RecoverAccountPage.tsx` (new)
 
-Clean, modern UI with:
-- Email/password fields
+**Register Flow**:
+1. User enters username and password
+2. On successful registration, **immediately display recovery phrase modal**
+3. **Critical**: User MUST write down 12-word recovery phrase
+4. Require user to confirm they've saved it (checkbox)
+5. No way to recover account without this phrase
+
+**Login UI**:
+- Username/password fields
 - Error handling
-- "Remember me" option
-- "Forgot password" link (future)
-- Social auth buttons (future)
+- "Forgot password?" link → Recovery page
+
+**Recovery Page**:
+- Username input
+- 12-word recovery phrase input (textarea)
+- Set new password
+- Verify and login
 
 ### 2.3 Protected Routes
 **File**: `App.tsx`
@@ -749,10 +768,11 @@ console.log('✅ All existing data assigned to admin user');
 
 ### Critical Requirements
 - [ ] All passwords hashed with bcrypt (salt rounds ≥12)
+- [ ] All recovery phrases hashed with bcrypt (never stored plain)
 - [ ] All sensitive credentials encrypted at rest
 - [ ] JWT secrets stored in environment variables (not committed)
 - [ ] HTTPS enforced in production
-- [ ] Rate limiting on all endpoints
+- [ ] Rate limiting on all endpoints (strict on auth endpoints)
 - [ ] SQL injection prevention (parameterized queries everywhere)
 - [ ] XSS prevention (sanitize all user inputs)
 - [ ] CORS properly configured
@@ -760,8 +780,9 @@ console.log('✅ All existing data assigned to admin user');
 - [ ] Audit logging for sensitive operations
 - [ ] Row-level security (every query filters by user_id)
 - [ ] Admin actions logged
-- [ ] Password reset flow (email verification)
-- [ ] Account lockout after failed logins
+- [ ] Recovery phrase shown ONCE on registration with confirmation
+- [ ] Account lockout after failed logins (5 attempts)
+- [ ] Rate limit recovery attempts (prevent brute force)
 - [ ] 2FA support (future enhancement)
 
 ---
@@ -770,10 +791,9 @@ console.log('✅ All existing data assigned to admin user');
 
 ### MVP (0-100 users)
 - **Hosting**: Railway/Render - $5-10/month
-- **Domain**: $12/year
-- **Email**: SendGrid free tier (12k emails/month)
+- **Domain**: $12/year (optional)
 - **Backups**: Backblaze B2 - $0.005/GB/month
-- **Total**: ~$15/month
+- **Total**: ~$10/month
 
 ### Growth (100-1000 users)
 - **Hosting**: Railway/Render Pro - $20-30/month
@@ -842,31 +862,32 @@ console.log('✅ All existing data assigned to admin user');
 
 ## Open Questions & Decisions Needed
 
-1. **Email Service**: Which provider for password resets and notifications?
-   - Options: SendGrid, Mailgun, AWS SES
-   - Recommendation: SendGrid (12k free emails/month)
-
-2. **Database Migration**: When to move from SQLite to PostgreSQL?
+1. **Database Migration**: When to move from SQLite to PostgreSQL?
    - SQLite: Good for <10k users with proper indexing
    - PostgreSQL: Better for >10k users, better concurrency
    - Recommendation: Start with SQLite, migrate when needed
 
-3. **Payment**: Will you charge users?
+2. **Payment**: Will you charge users?
    - If yes: Stripe integration needed
    - If no: How to monetize and cover costs?
 
-4. **Bot Limits**: Max bots per user?
+3. **Bot Limits**: Max bots per user?
    - Free tier: 3 bots
    - Paid tier: Unlimited
    - Recommendation: Start with 5 bots/user, no payment
 
-5. **Arena Competitions**: Prize pools or just bragging rights?
+4. **Arena Competitions**: Prize pools or just bragging rights?
    - Real money prizes require legal compliance
    - Virtual prizes (badges, titles) easier to implement
 
-6. **Data Retention**: How long to keep inactive accounts?
+5. **Data Retention**: How long to keep inactive accounts?
    - GDPR compliance: Allow user data deletion
    - Recommendation: 90 days inactivity warning, 120 days deletion
+   
+6. **HTTPS Support**: Backend needs HTTPS for production deployment
+   - Current: HTTP-only Express server
+   - Options: Reverse proxy (nginx/caddy), native HTTPS in Express, or platform-provided SSL
+   - Recommendation: Use Railway/Render which provides automatic HTTPS
 
 ---
 
