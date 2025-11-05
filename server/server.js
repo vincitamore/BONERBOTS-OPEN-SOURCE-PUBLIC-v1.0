@@ -12,6 +12,7 @@ const axios = require('axios');
 const config = require('./config');
 const { getArenaState, updateArenaState, initializeArenaState } = require('./database');
 const WebSocketServer = require('./websocket');
+const BotManager = require('./services/BotManager');
 
 // Validate configuration before starting
 if (!config.validateConfig()) {
@@ -21,6 +22,10 @@ if (!config.validateConfig()) {
 
 const app = express();
 const wsServer = new WebSocketServer(config.wsPort);
+const botManager = new BotManager(config, wsServer);
+
+// Make botManager available to routes
+app.locals.botManager = botManager;
 
 // Middleware
 app.use(cors());
@@ -289,19 +294,17 @@ app.post('/api/aster/trade', async (req, res) => {
 });
 
 /**
- * GET /api/state - Get current arena state
+ * GET /api/state - Get current arena state from BotManager
  */
 app.get('/api/state', async (req, res) => {
   try {
-    const stateData = getArenaState();
+    const bots = botManager.getBots();
+    const markets = botManager.markets;
     
-    if (!stateData) {
-      // Return empty state if none exists
-      return res.json({ bots: [], marketData: [] });
-    }
-    
-    res.json(stateData.state);
-    
+    res.json({
+      bots,
+      marketData: markets
+    });
   } catch (error) {
     console.error('Error getting state:', error);
     res.status(500).json({ error: 'Error retrieving arena state' });
@@ -309,29 +312,12 @@ app.get('/api/state', async (req, res) => {
 });
 
 /**
- * POST /api/state - Update arena state (Broadcast mode only)
+ * POST /api/state - Update arena state (DEPRECATED - state is now managed server-side)
+ * Kept for backwards compatibility but no longer used
  */
 app.post('/api/state', async (req, res) => {
-  try {
-    const newState = req.body;
-    
-    // Basic validation
-    if (!newState || typeof newState !== 'object') {
-      return res.status(400).json({ error: 'Invalid state object' });
-    }
-    
-    // Update database
-    updateArenaState(newState);
-    
-    // Broadcast to all WebSocket clients
-    wsServer.broadcastState(newState);
-    
-    res.json({ success: true, clients: wsServer.getClientCount() });
-    
-  } catch (error) {
-    console.error('Error updating state:', error);
-    res.status(500).json({ error: 'Error updating arena state' });
-  }
+  console.warn('⚠️ POST /api/state is deprecated - state is now managed server-side');
+  res.json({ success: true, message: 'State is now managed server-side', clients: wsServer.getClientCount() });
 });
 
 /**
@@ -353,6 +339,59 @@ app.delete('/api/state', async (req, res) => {
   } catch (error) {
     console.error('Error clearing state:', error);
     res.status(500).json({ error: 'Error clearing arena state' });
+  }
+});
+
+// ============ BOT CONTROL API ============
+
+/**
+ * POST /api/bots/:botId/pause - Toggle bot pause state (BotManager)
+ */
+app.post('/api/bots/:botId/pause', async (req, res) => {
+  try {
+    const { botId } = req.params;
+    const bot = await botManager.toggleBotPause(botId);
+    res.json({ success: true, bot });
+  } catch (error) {
+    console.error('Error toggling bot pause:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/bots/:botId/close-position - Manually close a position (BotManager)
+ */
+app.post('/api/bots/:botId/close-position', async (req, res) => {
+  try {
+    const { botId } = req.params;
+    const { positionId } = req.body;
+    
+    if (!positionId) {
+      return res.status(400).json({ error: 'Missing positionId' });
+    }
+    
+    const result = await botManager.manualClosePosition(botId, positionId);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error closing position:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/bots/:botId/force-turn - Force bot to process a trading turn
+ */
+app.post('/api/bots/:botId/force-turn', async (req, res) => {
+  try {
+    const { botId } = req.params;
+    // Run trading turn for specific bot (don't await - let it run in background)
+    botManager.runTradingTurn(botId).catch(err => 
+      console.error(`Error in forced trading turn for ${botId}:`, err)
+    );
+    res.json({ success: true, message: 'Trading turn initiated' });
+  } catch (error) {
+    console.error('Error forcing trading turn:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -397,31 +436,38 @@ app.use((err, req, res, next) => {
 
 // ============ SERVER STARTUP ============
 
-// Initialize default state if needed
-const defaultState = { bots: [], marketData: [] };
-initializeArenaState(defaultState);
-
 // Start WebSocket server
 wsServer.start();
 
 // Start HTTP server
-app.listen(config.port, () => {
+app.listen(config.port, async () => {
   console.log('\n🚀 BONERBOTS AI Arena Server');
   console.log(`   HTTP Server: http://localhost:${config.port}`);
   console.log(`   WebSocket Server: ws://localhost:${config.wsPort}`);
   console.log(`   Environment: ${config.nodeEnv}`);
   console.log(`   Database: ${config.databasePath}\n`);
+  
+  // Start BotManager (autonomous trading)
+  try {
+    await botManager.start();
+    console.log('✅ Autonomous trading engine online\n');
+  } catch (error) {
+    console.error('❌ Failed to start BotManager:', error);
+    console.error('   Trading will not function. Please check your configuration.\n');
+  }
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received: closing servers');
+  botManager.stop();
   wsServer.close();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('SIGINT signal received: closing servers');
+  botManager.stop();
   wsServer.close();
   process.exit(0);
 });

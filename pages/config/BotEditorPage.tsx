@@ -126,22 +126,36 @@ export const BotEditorPage: React.FC = () => {
       setSaving(true);
 
       if (isEditMode) {
-        await updateBot(botId!, {
+        // Build updates object, omitting null values
+        const updates: any = {
           name: formData.name,
           prompt: formData.prompt,
           provider_id: parseInt(formData.provider_id),
           trading_mode: formData.trading_mode,
-          avatar_image: formData.avatar_image,
-        });
+        };
+        
+        // Only include avatar_image if it's not null
+        if (formData.avatar_image !== null) {
+          updates.avatar_image = formData.avatar_image;
+        }
+        
+        await updateBot(botId!, updates);
       } else {
-        await createBot({
+        // Build creation object, omitting null values
+        const botData: any = {
           id: formData.id,
           name: formData.name,
           prompt: formData.prompt,
           provider_id: parseInt(formData.provider_id),
           trading_mode: formData.trading_mode,
-          avatar_image: formData.avatar_image,
-        });
+        };
+        
+        // Only include avatar_image if it's not null
+        if (formData.avatar_image !== null) {
+          botData.avatar_image = formData.avatar_image;
+        }
+        
+        await createBot(botData);
       }
 
       navigate('/config/bots');

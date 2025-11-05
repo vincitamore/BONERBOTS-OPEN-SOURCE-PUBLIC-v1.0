@@ -1,7 +1,6 @@
 // components/BotCard.tsx
 import React from 'react';
 import { BotState, AppMode, ModalContentType } from '../types';
-import { botImageMap } from '../assets';
 import PlayIcon from './icons/PlayIcon';
 import PauseIcon from './icons/PauseIcon';
 import RefreshIcon from './icons/RefreshIcon';
@@ -43,8 +42,8 @@ const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 100
     const totalPnl = realizedPnl + unrealizedPnl;
     const totalPnlPercent = initialBalance > 0 ? ((totalValue - initialBalance) / initialBalance) * 100 : 0;
     
-    // Use database avatar if available, otherwise fall back to hardcoded map
-    const avatarSrc = avatarUrl || botImageMap[bot.name] || `https://robohash.org/${bot.id}.png?set=set1&size=200x200`;
+    // Use database avatar if available, otherwise generate from bot ID
+    const avatarSrc = avatarUrl || `https://robohash.org/${bot.id}.png?set=set1&size=200x200`;
     
     return (
         <div className={`bg-gray-800/50 rounded-xl shadow-2xl border-2 ${isPaused ? 'border-yellow-500' : (isLive ? 'border-red-500' : botColorMap[bot.name] || 'border-gray-700')} p-4 space-y-3 flex flex-col`}>

@@ -12,7 +12,6 @@ import PositionsTable from './PositionsTable';
 import OrderHistory from './OrderHistory';
 import BotStatus from './BotStatus';
 import InfoPane from './InfoPane';
-import { LIVE_BOT_INITIAL_BALANCE, PAPER_BOT_INITIAL_BALANCE } from '../constants';
 
 // Fix: Defined a local state type to accurately represent the hydrated data used for rendering.
 // The network sends SerializableBotState, but components require the full BotState.
@@ -97,7 +96,7 @@ const SpectatorDashboard: React.FC = () => {
             mode="spectator"
             bot={bot} 
             rank={index + 1}
-            initialBalance={bot.tradingMode === 'real' ? LIVE_BOT_INITIAL_BALANCE : PAPER_BOT_INITIAL_BALANCE}
+            initialBalance={bot.initialBalance}
             onOpenModal={(content) => handleOpenModal(bot, content)}
           />
         ))}

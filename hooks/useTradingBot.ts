@@ -1,718 +1,129 @@
 // hooks/useTradingBot.ts
+// REFACTORED: Frontend is now a passive viewer that displays server-managed state
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import { BotState, Market, Portfolio, AiDecision, AiAction, Position, OrderType, ValueHistoryPoint, Order, BotLog, ArenaState } from '../types';
-import { PAPER_BOT_INITIAL_BALANCE, LIVE_BOT_INITIAL_BALANCE, TURN_INTERVAL_MS, REFRESH_INTERVAL_MS } from '../constants';
-import { getMarketData, executeTrade, getRealAccountState, placeRealOrder, setLeverage, getExchangeInfo, SymbolPrecisionInfo, getRealTradeHistory } from '../services/asterdexService';
-import { getTradingDecision } from '../services/geminiService';
-import { getGrokTradingDecision } from '../services/grokService';
-import { getArenaState } from '../services/stateService';
-import { isAppConfigured } from '../config';
-import { leverageLimits } from '../leverageLimits';
+import { BotState, Market, ArenaState } from '../types';
+import { subscribeToStateChanges } from '../services/stateService';
 
-const MINIMUM_TRADE_SIZE_USD = 50;
-const SYMBOL_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-// Type for API Bot response
-interface ApiBot {
-    id: string;
-    name: string;
-    prompt: string;
-    provider_id: number;
-    provider_name?: string;
-    provider_type?: string;
-    trading_mode: 'paper' | 'real';
-    is_active: boolean;
-    is_paused: boolean;
-    avatar_image?: string | null;
-}
-
-// Type for API Provider response
-interface ApiProvider {
-    id: number;
-    name: string;
-    provider_type: 'openai' | 'anthropic' | 'gemini' | 'grok' | 'local' | 'custom';
-}
-
-// Helper to create a fresh bot state
-function createNewBot(id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', providerName?: string, avatarUrl?: string | null): BotState {
-    const initialBalance = mode === 'real' ? LIVE_BOT_INITIAL_BALANCE : PAPER_BOT_INITIAL_BALANCE;
-    return {
-        id,
-        name,
-        prompt,
-        provider,
-        providerName,
-        avatarUrl,
-        tradingMode: mode,
-        portfolio: {
-            balance: initialBalance,
-            pnl: 0,
-            totalValue: initialBalance,
-            positions: [],
-        },
-        orders: [],
-        botLogs: [],
-        valueHistory: [{ timestamp: Date.now(), value: initialBalance }],
-        isLoading: false,
-        isPaused: false,
-        realizedPnl: 0,
-        tradeCount: 0,
-        winRate: 0,
-        symbolCooldowns: {},
-        getDecision: (portfolio: Portfolio, marketData: Market[], recentLogs?: BotLog[], cooldowns?: Record<string, number>, recentOrders?: Order[]) => {
-            if (provider === 'grok') {
-                return getGrokTradingDecision(portfolio, marketData, prompt, recentLogs, cooldowns, recentOrders);
-            }
-            return getTradingDecision(portfolio, marketData, prompt, recentLogs, cooldowns, recentOrders);
-        }
-    };
-}
-
-// Fetch bots and providers from API
-async function fetchBotConfigs(): Promise<{ id: string, name: string, prompt: string, provider: 'gemini' | 'grok', mode: 'paper' | 'real', isPaused: boolean, providerName?: string, avatarUrl?: string | null }[]> {
-    try {
-        const [botsResponse, providersResponse] = await Promise.all([
-            axios.get<ApiBot[]>(`${API_BASE_URL}/api/v2/bots`),
-            axios.get<ApiProvider[]>(`${API_BASE_URL}/api/v2/providers`)
-        ]);
-
-        const providersMap = new Map(providersResponse.data.map(p => [p.id, { type: p.provider_type, name: p.name }]));
-
-        return botsResponse.data
-            .filter(bot => bot.is_active) // Only load active bots
-            .map(bot => {
-                const providerInfo = providersMap.get(bot.provider_id);
-                const providerType = providerInfo?.type;
-                // Default to 'gemini' if provider type is not gemini or grok
-                const provider = (providerType === 'gemini' || providerType === 'grok') ? providerType : 'gemini';
-                
-                return {
-                    id: bot.id,
-                    name: bot.name,
-                    prompt: bot.prompt,
-                    provider,
-                    providerName: providerInfo?.name, // Get provider name from database
-                    mode: bot.trading_mode,
-                    isPaused: bot.is_paused,
-                    avatarUrl: bot.avatar_image
-                };
-            });
-    } catch (error) {
-        console.error('Failed to fetch bot configurations from API:', error);
-        return [];
-    }
-}
 
 const useTradingBots = (isGloballyPaused: boolean) => {
     const [bots, setBots] = useState<BotState[]>([]);
     const [markets, setMarkets] = useState<Market[]>([]);
-    const [symbolPrecisions, setSymbolPrecisions] = useState<Map<string, SymbolPrecisionInfo>>(new Map());
     const [isLoading, setIsLoading] = useState(true);
     const initialBalanceRef = useRef<Map<string, number>>(new Map());
+    const unsubscribeRef = useRef<(() => void) | null>(null);
     
-    // Helper function to save bot state snapshot to database for analytics
-    const saveSnapshot = async (bot: BotState) => {
-        try {
-            const token = localStorage.getItem('token');
-            await axios.post(`${API_BASE_URL}/api/v2/bots/${bot.id}/snapshot`, {
-                balance: bot.portfolio.balance,
-                total_value: bot.portfolio.totalValue,
-                realized_pnl: bot.realizedPnl || 0,
-                unrealized_pnl: bot.portfolio.pnl || 0,
-                position_count: bot.portfolio.positions.length,
-                trade_count: bot.tradeCount || 0,
-                win_rate: bot.winRate || 0
-            }, {
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-            });
-            console.log(`💾 Snapshot saved for ${bot.name}`);
-        } catch (error) {
-            console.error(`Failed to save snapshot for ${bot.name}:`, error);
-            // Don't throw - this is non-critical
-        }
-    };
-
-
-    const turnIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-    const botFunctionsRef = useRef<{
-        updatePortfolios: () => Promise<Market[]>;
-        runTradingTurn: (providedMarkets?: Market[], specificBotId?: string) => Promise<void>;
-    }>({
-        updatePortfolios: async () => [],
-        runTradingTurn: async () => {}
-    });
-
+    // Subscribe to server state updates via WebSocket
     useEffect(() => {
-        const initialize = async () => {
-            console.log("🚀 Starting bot initialization...");
+        console.log('🔌 Subscribing to server state updates...');
+        
+        // Initial state fetch
+        const fetchInitialState = async () => {
             try {
-                if (!isAppConfigured) {
-                    console.log("⚠️ App not configured, skipping initialization");
-                    setIsLoading(false);
-                    return;
-                }
+                const response = await axios.get<ArenaState>(`${API_BASE_URL}/api/state`);
+                const { bots: serverBots, marketData } = response.data;
                 
-                // Try to fetch symbol precisions, but don't block if it fails
-                console.log("📊 Fetching exchange info...");
-                try {
-                    const timeout = new Promise<never>((_, reject) => 
-                        setTimeout(() => reject(new Error('getExchangeInfo timeout')), 3000)
-                    );
-                    const precisions = await Promise.race([getExchangeInfo(), timeout]);
-                    setSymbolPrecisions(precisions);
-                    console.log("✅ Fetched symbol precisions:", precisions);
-                } catch (error) {
-                    console.warn("⚠️ Failed to fetch exchange info (exchange API may not be configured):", error);
-                    // Continue initialization even if this fails
-                }
-
-                // Fetch bot configurations from API
-                console.log("🤖 Fetching bot configurations...");
-                const botConfigs = await fetchBotConfigs();
-                console.log("📝 Found", botConfigs.length, "bot configs:", botConfigs);
-                
-                if (botConfigs.length === 0) {
-                    console.warn("⚠️ No active bots found in the database. Please configure bots via the UI.");
-                    setIsLoading(false);
-                    setBots([]);
-                    return;
-                }
-
-            const savedState = await getArenaState();
-            let initialBots: BotState[];
-
-            if (savedState && savedState.bots?.length > 0) {
-                console.log("Resuming from saved state.");
-                initialBots = savedState.bots.map(savedBot => {
-                    const config = botConfigs.find(c => c.id === savedBot.id);
-                    if (!config) return null;
-                    const botState: BotState = {
-                        ...savedBot,
-                        tradingMode: config.mode,
-                        isPaused: config.isPaused, // Update pause state from database
-                        providerName: config.providerName, // Update provider name from database
-                        symbolCooldowns: savedBot.symbolCooldowns || {},
-                        getDecision: (portfolio: Portfolio, marketData: Market[], recentLogs?: BotLog[], cooldowns?: Record<string, number>, recentOrders?: Order[]) => {
-                            if (config.provider === 'grok') return getGrokTradingDecision(portfolio, marketData, config.prompt, recentLogs, cooldowns, recentOrders);
-                            return getTradingDecision(portfolio, marketData, config.prompt, recentLogs, cooldowns, recentOrders);
-                        }
-                    };
-                    return botState;
-                }).filter((bot): bot is BotState => bot !== null);
-            } else {
-                console.log("No saved state found. Starting fresh simulation.");
-                initialBots = botConfigs.map(c => createNewBot(c.id, c.name, c.prompt, c.provider, c.mode, c.providerName, c.avatarUrl));
-                // Set initial pause state from database
-                initialBots = initialBots.map(bot => {
-                    const config = botConfigs.find(c => c.id === bot.id);
-                    return { ...bot, isPaused: config?.isPaused || false };
+                console.log('📦 Loaded initial state from server:', {
+                    bots: serverBots?.length || 0,
+                    markets: marketData?.length || 0
                 });
-            }
-
-            // Perform a one-time sync for any live bot to correct its initial state and value history.
-            const liveCorrectedBots = await Promise.all(initialBots.map(async (bot) => {
-                if (bot.tradingMode === 'real') {
-                    try {
-                        console.log(`[${bot.name}] Performing initial sync with live exchange...`);
-                        
-                        // Add timeout to prevent hanging if API credentials aren't configured
-                        const timeout = new Promise<never>((_, reject) => 
-                            setTimeout(() => reject(new Error('Exchange sync timeout')), 5000)
-                        );
-                        
-                        const [realPortfolio, realOrders] = await Promise.race([
-                            Promise.all([
-                                getRealAccountState(bot.id),
-                                getRealTradeHistory(bot.id)
-                            ]),
-                            timeout
-                        ]);
-                        
-                        const realizedPnl = realOrders.reduce((acc, o) => acc + o.pnl, 0);
-
-                        // FIX: Use the hardcoded initial balance for PnL calculations.
-                        initialBalanceRef.current.set(bot.id, LIVE_BOT_INITIAL_BALANCE);
-                        
-                        // FIX: Reset the value history to start with the true current value.
-                        // This prevents the chart from showing an initial drop from the default balance.
-                        const correctedHistory = [{ timestamp: Date.now(), value: realPortfolio.totalValue }];
-
-                        return {
-                            ...bot,
-                            portfolio: realPortfolio,
-                            orders: realOrders,
-                            realizedPnl: realizedPnl,
-                            valueHistory: correctedHistory,
-                        };
-                    } catch (e) {
-                        console.warn(`[${bot.name}] Failed initial sync with exchange (credentials may not be configured). Starting with default state.`, e);
-                        initialBalanceRef.current.set(bot.id, LIVE_BOT_INITIAL_BALANCE);
-                        return bot;
-                    }
+                
+                if (serverBots && serverBots.length > 0) {
+                    setBots(serverBots);
+                    
+                    // Set initial balances from server-provided values
+                    serverBots.forEach(bot => {
+                        initialBalanceRef.current.set(bot.id, bot.initialBalance);
+                    });
                 }
-                initialBalanceRef.current.set(bot.id, PAPER_BOT_INITIAL_BALANCE);
-                return bot;
-            }));
-
-            setBots(liveCorrectedBots);
-            setIsLoading(false);
-            } catch (error) {
-                console.error("Error initializing bots:", error);
-                // Still set loading to false so UI doesn't hang
+                
+                if (marketData) {
+                    setMarkets(marketData);
+                }
+                
                 setIsLoading(false);
-                // Set empty bots array
-                setBots([]);
+            } catch (error) {
+                console.error('Failed to fetch initial state:', error);
+                setIsLoading(false);
             }
         };
-        initialize();
+        
+        fetchInitialState();
+        
+        // Subscribe to real-time updates
+        const unsubscribe = subscribeToStateChanges((newState: ArenaState) => {
+            console.log('📡 Received state update from server');
+            
+            if (newState.bots) {
+                setBots(newState.bots);
+                
+                // Update initial balances for any new bots from server-provided values
+                newState.bots.forEach(bot => {
+                    if (!initialBalanceRef.current.has(bot.id)) {
+                        initialBalanceRef.current.set(bot.id, bot.initialBalance);
+                    }
+                });
+            }
+            
+            if (newState.marketData) {
+                setMarkets(newState.marketData);
+            }
+        });
+        
+        unsubscribeRef.current = unsubscribe;
+        
+        return () => {
+            console.log('🔌 Unsubscribing from server state updates');
+            if (unsubscribeRef.current) {
+                unsubscribeRef.current();
+            }
+        };
     }, []);
 
-    const getAdjustedQuantity = useCallback((symbol: string, rawQuantity: number): number => {
-        const precision = symbolPrecisions.get(symbol)?.quantityPrecision ?? 3;
-        const factor = Math.pow(10, precision);
-        return Math.floor(rawQuantity * factor) / factor;
-    }, [symbolPrecisions]);
+    /**
+     * Toggle bot pause state (via server API)
+     */
+    const toggleBotPause = useCallback(async (botId: string) => {
+        try {
+            console.log(`🔄 Toggling pause for bot ${botId}`);
+            await axios.post(`${API_BASE_URL}/api/bots/${botId}/pause`);
+            // State update will come via WebSocket
+        } catch (error) {
+            console.error('Failed to toggle bot pause:', error);
+            alert('Failed to toggle bot pause. Please try again.');
+        }
+    }, []);
 
-    useEffect(() => {
-        botFunctionsRef.current.updatePortfolios = async (): Promise<Market[]> => {
-            const marketData = await getMarketData();
-            if (!marketData || marketData.length === 0) return [];
-            setMarkets(marketData);
-
-            const updatedBots = await Promise.all(bots.map(async (bot) => {
-                let updatedPortfolio: Portfolio;
-                let updatedOrders: Order[] = bot.orders;
-                let updatedRealizedPnl = bot.realizedPnl;
-
-                if (bot.tradingMode === 'real') {
-                    // For real trading, ASTER is the single source of truth.
-                    updatedPortfolio = await getRealAccountState(bot.id);
-                    updatedOrders = await getRealTradeHistory(bot.id);
-                    // Realized PnL is the sum of PnL from the official trade history.
-                    updatedRealizedPnl = updatedOrders.reduce((acc, order) => acc + order.pnl, 0);
-
-                    // Set initial balance only once to correctly calculate PnL percentage.
-                    if (!initialBalanceRef.current.has(bot.id)) {
-                        // FIX: Use the hardcoded initial balance for PnL calculations.
-                        initialBalanceRef.current.set(bot.id, LIVE_BOT_INITIAL_BALANCE);
-                    }
-                } else { // Paper trading PnL update remains simulated
-                    const { portfolio } = bot;
-                    let unrealizedPnl = 0;
-                    let totalMarginUsed = 0;
-                    const updatedPositions = portfolio.positions.map(pos => {
-                        const currentPrice = marketData.find(m => m.symbol === pos.symbol)?.price ?? pos.entryPrice;
-                        const assetQuantity = (pos.size * pos.leverage) / pos.entryPrice;
-                        const pnl = (currentPrice - pos.entryPrice) * assetQuantity * (pos.type === OrderType.LONG ? 1 : -1);
-                        unrealizedPnl += pnl;
-                        totalMarginUsed += pos.size;
-                        return { ...pos, pnl };
-                    });
-                    const totalValue = portfolio.balance + totalMarginUsed + unrealizedPnl;
-                    updatedPortfolio = { ...portfolio, pnl: unrealizedPnl, totalValue, positions: updatedPositions };
-                }
-
-                // The performance chart now plots the true account value over time.
-                const newValueHistory: ValueHistoryPoint = { timestamp: Date.now(), value: updatedPortfolio.totalValue };
-                const newHistory = [...bot.valueHistory, newValueHistory].slice(-300); // Keep history to a reasonable size
-                return { ...bot, portfolio: updatedPortfolio, valueHistory: newHistory, orders: updatedOrders, realizedPnl: updatedRealizedPnl };
-            }));
-            setBots(updatedBots);
+    /**
+     * Manually close a position (via server API)
+     */
+    const manualClosePosition = useCallback(async (botId: string, positionId: string) => {
+        try {
+            console.log(`🖐️ Manually closing position ${positionId} for bot ${botId}`);
             
-            // Save snapshots for all bots after portfolio update (non-blocking)
-            updatedBots.forEach(bot => {
-                saveSnapshot(bot).catch(err => console.error(`Failed to save snapshot for ${bot.name}:`, err));
+            const response = await axios.post(`${API_BASE_URL}/api/bots/${botId}/close-position`, {
+                positionId
             });
             
-            return marketData; // Return the market data so it can be used immediately
-        };
-
-        botFunctionsRef.current.runTradingTurn = async (providedMarkets?: Market[], specificBotId?: string) => {
-            console.log(specificBotId ? `🎲 Running trading turn for bot: ${specificBotId}...` : '🎲 Running trading turn for all active bots...');
-            
-            // Use provided markets or fall back to state
-            const activeMarkets = providedMarkets || markets;
-            
-            // Safety check: Ensure markets are loaded before processing trades
-            if (activeMarkets.length === 0) {
-                console.warn('⚠️ Market data not loaded yet, skipping trading turn');
-                return;
-            }
-            
-            console.log(`   📊 Available markets: ${activeMarkets.length}`, activeMarkets.map(m => m.symbol));
-            
-            // Filter to specific bot if requested, otherwise process all
-            const botsToProcess = specificBotId ? bots.filter(b => b.id === specificBotId) : bots;
-            const activeBots = botsToProcess.filter(b => !b.isPaused);
-            console.log(`   Active bots: ${activeBots.length} / ${botsToProcess.length}`);
-            
-            for (const bot of botsToProcess) {
-                if (bot.isPaused) {
-                    console.log(`   ⏭️ Skipping ${bot.name} - paused`);
-                    continue;
-                }
-                
-                console.log(`   🤖 Processing turn for ${bot.name} (${bot.tradingMode} mode)...`);
-
-                // Safety check: Skip if bot portfolio is not properly initialized
-                if (!bot.portfolio || bot.portfolio.balance == null) {
-                    console.log(`   ⚠️ Skipping ${bot.name} - portfolio not initialized`);
-                    continue;
-                }
-
-                setBots(current => current.map(b => b.id === bot.id ? { ...b, isLoading: true } : b));
-                
-                // Pass recent decision history and cooldowns to the bot so it has context
-                console.log(`   🧠 Requesting decision from ${bot.provider.toUpperCase()} for ${bot.name}...`);
-                const decisionStart = Date.now();
-                const { prompt, decisions, error } = await bot.getDecision(bot.portfolio, activeMarkets, bot.botLogs.slice(0, 5), bot.symbolCooldowns, bot.orders.slice(0, 10));
-                const decisionTime = Date.now() - decisionStart;
-                console.log(`   ⏱️ Decision received in ${decisionTime}ms, prompt length: ${prompt.length} chars`);
-                
-                const notes: string[] = [];
-                
-                // Add error to notes if API call failed
-                if (error) {
-                    console.error(`   ❌ API Error for ${bot.name}: ${error}`);
-                    notes.push(`⚠️ API ERROR: ${error}`);
-                }
-                
-                const validatedDecisions: { decision: AiDecision, adjustedLeverage: number }[] = [];
-
-                console.log(`   📋 Processing ${decisions.length} decisions for ${bot.name}`);
-                decisions.forEach((decision, idx) => {
-                    console.log(`   Decision ${idx + 1}:`, decision);
-                    // Rule: Minimum trade size
-                    if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && decision.size && decision.size < MINIMUM_TRADE_SIZE_USD) {
-                        notes.push(`REJECTED ${decision.action} ${decision.symbol}: Margin $${decision.size.toFixed(2)} is below minimum of $${MINIMUM_TRADE_SIZE_USD}.`);
-                        return;
-                    }
-
-                    // NOTE: No hard cooldown enforcement - bots see cooldown info in their prompt and can make informed decisions
-                    // They have access to their decision history and can choose whether to respect cooldowns or not
-
-                    // Rule: Adjust Leverage
-                    let adjustedLeverage = decision.leverage || 1;
-                    if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && decision.symbol) {
-                        const maxLeverage = leverageLimits.get(decision.symbol) ?? 25;
-                        if (adjustedLeverage > maxLeverage) {
-                            notes.push(`NOTE: Leverage for ${decision.symbol} adjusted from ${adjustedLeverage}x to exchange max of ${maxLeverage}x.`);
-                            adjustedLeverage = maxLeverage;
-                        }
-                    }
-                    validatedDecisions.push({ decision, adjustedLeverage });
-                });
-
-                console.log(`   ✅ ${validatedDecisions.length} decisions passed validation`);
-
-                let updatedBotState: BotState = { ...bot };
-
-                console.log(`   💼 Trading mode: ${bot.tradingMode}`);
-                if (bot.tradingMode === 'real') {
-                    for (const { decision, adjustedLeverage } of validatedDecisions) {
-                        const market = activeMarkets.find(m => m.symbol === decision.symbol);
-                        try {
-                            if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && market && decision.size && decision.symbol) {
-                                
-                                const availableBalance = updatedBotState.portfolio.balance;
-                                let tradeSize = decision.size;
-
-                                // STAGE 1: Check if balance can even cover the minimum trade.
-                                if (availableBalance < MINIMUM_TRADE_SIZE_USD) {
-                                    notes.push(`REJECTED ${decision.action} ${decision.symbol}: Available balance $${availableBalance.toFixed(2)} is below the minimum trade size of $${MINIMUM_TRADE_SIZE_USD}.`);
-                                    continue; // Skip this trade entirely
-                                }
-
-                                // STAGE 2: Adjust trade size if it exceeds available balance.
-                                if (tradeSize > availableBalance) {
-                                    notes.push(`NOTE: Trade size for ${decision.symbol} adjusted from $${tradeSize.toFixed(2)} to fit available margin of $${availableBalance.toFixed(2)}.`);
-                                    tradeSize = availableBalance; // Adjust size down to what's available
-                                }
-                                
-                                // Final check to ensure adjusted size is still valid.
-                                if (tradeSize < MINIMUM_TRADE_SIZE_USD) {
-                                    notes.push(`REJECTED ${decision.action} ${decision.symbol}: Adjusted trade size $${tradeSize.toFixed(2)} is below minimum of $${MINIMUM_TRADE_SIZE_USD}.`);
-                                    continue;
-                                }
-
-                                // 1. Set Leverage
-                                await setLeverage(decision.symbol, adjustedLeverage, bot.id);
-                                
-                                // 2. Open Position with MARKET order
-                                const rawQuantity = (tradeSize * adjustedLeverage) / market.price;
-                                const quantity = getAdjustedQuantity(decision.symbol, rawQuantity);
-                                
-                                if (quantity <= 0) {
-                                    notes.push(`Execution Warning: Calculated quantity for ${decision.symbol} is 0.`);
-                                    continue;
-                                }
-                                await placeRealOrder({ symbol: decision.symbol, side: decision.action === AiAction.LONG ? 'BUY' : 'SELL', type: 'MARKET', quantity }, bot.id);
-                                notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position.`);
-
-                                // 3. Place Stop-Loss and Take-Profit orders
-                                const slTpPromises = [];
-                                const orderSide = decision.action === AiAction.LONG ? 'SELL' : 'BUY';
-
-                                if (decision.stopLoss) {
-                                    slTpPromises.push(placeRealOrder({
-                                        symbol: decision.symbol,
-                                        side: orderSide,
-                                        type: 'STOP_MARKET',
-                                        stopPrice: decision.stopLoss,
-                                        quantity,
-                                        reduceOnly: 'true'
-                                    }, bot.id));
-                                }
-                                if (decision.takeProfit) {
-                                    slTpPromises.push(placeRealOrder({
-                                        symbol: decision.symbol,
-                                        side: orderSide,
-                                        type: 'TAKE_PROFIT_MARKET',
-                                        stopPrice: decision.takeProfit,
-                                        quantity,
-                                        reduceOnly: 'true'
-                                    }, bot.id));
-                                }
-                                
-                                const results = await Promise.allSettled(slTpPromises);
-                                results.forEach((result, i) => {
-                                    const type = i === 0 && decision.stopLoss ? 'Stop-Loss' : 'Take-Profit';
-                                    if (result.status === 'fulfilled') {
-                                        notes.push(`SUCCESS: ${type} order placed for ${decision.symbol}.`);
-                                    } else {
-                                        notes.push(`ERROR: Failed to place ${type} order for ${decision.symbol}: ${result.reason.message}`);
-                                    }
-                                });
-
-                            } else if (decision.action === AiAction.CLOSE && decision.closePositionId) {
-                                const posToClose = bot.portfolio.positions.find(p => p.id === decision.closePositionId);
-                                if (posToClose) {
-                                    const rawQuantity = Math.abs((posToClose.size * posToClose.leverage) / posToClose.entryPrice);
-                                    const quantity = getAdjustedQuantity(posToClose.symbol, rawQuantity);
-
-                                    if (quantity > 0) {
-                                        await placeRealOrder({
-                                            symbol: posToClose.symbol,
-                                            side: posToClose.type === OrderType.LONG ? 'SELL' : 'BUY',
-                                            type: 'MARKET',
-                                            quantity,
-                                            reduceOnly: 'true',
-                                        }, bot.id);
-                                        // Track cooldown for informational purposes (shown in bot's next prompt)
-                                        updatedBotState.symbolCooldowns[posToClose.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
-                                        notes.push(`SUCCESS: Closed ${posToClose.symbol} position.`);
-                                    }
-                                }
-                            }
-                        } catch (error: any) {
-                            if (error.message && error.message.includes('ReduceOnly Order is rejected')) {
-                                notes.push(`NOTE: Attempted to close ${decision.closePositionId}, but position no longer exists on exchange.`);
-                            } else {
-                                console.error(`[${bot.name}] Error executing real trade:`, decision, error);
-                                notes.push(`Execution Error: ${error.message}`);
-                            }
-                        }
-                    }
-                } else { // Paper Trading Logic
-                    console.log(`   📝 Executing paper trades for ${validatedDecisions.length} validated decisions`);
-                    for (const { decision, adjustedLeverage } of validatedDecisions) {
-                        console.log(`   🎯 Processing decision:`, decision.action, decision.symbol, `$${decision.size}`);
-                        const market = activeMarkets.find(m => m.symbol === decision.symbol);
-                        console.log(`   📊 Market found:`, market ? `${market.symbol} @ $${market.price}` : 'NOT FOUND');
-                        
-                        if ((decision.action === AiAction.LONG || decision.action === AiAction.SHORT) && market && decision.size && decision.symbol) {
-                            console.log(`   ✅ All conditions met for trade execution`);
-                            
-                            const availableBalance = updatedBotState.portfolio.balance;
-                            let tradeSize = decision.size;
-
-                            // STAGE 1: Check if balance can even cover the minimum trade.
-                            if (availableBalance < MINIMUM_TRADE_SIZE_USD) {
-                                notes.push(`REJECTED ${decision.action} ${decision.symbol}: Available balance $${availableBalance.toFixed(2)} is below the minimum trade size of $${MINIMUM_TRADE_SIZE_USD}.`);
-                                continue; // Skip this trade entirely
-                            }
-
-                            // STAGE 2: Adjust trade size if it exceeds available balance.
-                            if (tradeSize > availableBalance) {
-                                notes.push(`NOTE: Trade size for ${decision.symbol} adjusted from $${tradeSize.toFixed(2)} to fit available margin of $${availableBalance.toFixed(2)}.`);
-                                tradeSize = availableBalance; // Adjust size down to what's available
-                            }
-                            
-                            // Final check to ensure adjusted size is still valid.
-                            if (tradeSize < MINIMUM_TRADE_SIZE_USD) {
-                                notes.push(`REJECTED ${decision.action} ${decision.symbol}: Adjusted trade size $${tradeSize.toFixed(2)} is below minimum of $${MINIMUM_TRADE_SIZE_USD}.`);
-                                continue;
-                            }
-
-                            // Calculate liquidation price
-                            // For LONG: liquidation when price drops to where loss = margin (100% loss)
-                            // For SHORT: liquidation when price rises to where loss = margin (100% loss)
-                            // Formula: For LONG: entryPrice * (1 - (1 / leverage))
-                            //          For SHORT: entryPrice * (1 + (1 / leverage))
-                            const isLong = decision.action === AiAction.LONG;
-                            const liquidationPrice = isLong 
-                                ? market.price * (1 - (1 / adjustedLeverage))
-                                : market.price * (1 + (1 / adjustedLeverage));
-                            
-                            const position: Position = {
-                                id: `pos_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-                                symbol: decision.symbol,
-                                type: decision.action === AiAction.LONG ? OrderType.LONG : OrderType.SHORT,
-                                entryPrice: market.price,
-                                size: tradeSize,
-                                leverage: adjustedLeverage,
-                                liquidationPrice: liquidationPrice,
-                                stopLoss: decision.stopLoss,
-                                takeProfit: decision.takeProfit,
-                                pnl: 0,
-                            };
-                            updatedBotState.portfolio.positions.push(position);
-                            updatedBotState.portfolio.balance -= tradeSize;
-                            
-                            // Create order record for history (entry trade)
-                            const entryFee = tradeSize * 0.03; // 3% fee
-                            const entryOrder: Order = {
-                                id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-                                symbol: decision.symbol,
-                                type: decision.action === AiAction.LONG ? OrderType.LONG : OrderType.SHORT,
-                                size: tradeSize,
-                                leverage: adjustedLeverage,
-                                pnl: -entryFee, // Entry has negative PnL (just the fee)
-                                fee: entryFee,
-                                timestamp: Date.now(),
-                                entryPrice: market.price,
-                                exitPrice: 0, // Not closed yet
-                            };
-                            updatedBotState.orders = [entryOrder, ...(updatedBotState.orders || [])];
-                            
-                            console.log(`   🎉 Position created! ID: ${position.id}, New balance: $${updatedBotState.portfolio.balance.toFixed(2)}, Total positions: ${updatedBotState.portfolio.positions.length}, Total orders: ${updatedBotState.orders.length}`);
-                            notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position with $${tradeSize.toFixed(2)} margin at $${market.price.toFixed(2)}.`);
-                            // DO NOT set cooldown when opening - only when closing!
-                        } else if (decision.action === AiAction.CLOSE && decision.closePositionId) {
-                            const posToClose = updatedBotState.portfolio.positions.find(p => p.id === decision.closePositionId);
-                            if (posToClose) {
-                                const market = activeMarkets.find(m => m.symbol === posToClose.symbol);
-                                if (market) {
-                                    // Calculate quantity based on size, leverage, and entry price
-                                    const assetQuantity = (posToClose.size * posToClose.leverage) / posToClose.entryPrice;
-                                    
-                                    // Calculate PnL based on price movement and quantity
-                                    const unrealizedPnl = posToClose.type === OrderType.LONG
-                                        ? (market.price - posToClose.entryPrice) * assetQuantity
-                                        : (posToClose.entryPrice - market.price) * assetQuantity;
-                                    
-                                    const exitFee = posToClose.size * 0.03; // 3% fee on exit (on the margin/size)
-                                    const netPnl = unrealizedPnl - exitFee;
-                                    
-                                    updatedBotState.portfolio.balance += posToClose.size + netPnl;
-                                    updatedBotState.portfolio.positions = updatedBotState.portfolio.positions.filter(p => p.id !== posToClose.id);
-                                    updatedBotState.realizedPnl = (updatedBotState.realizedPnl || 0) + netPnl;
-                                    
-                                    // Increment trade count (a trade is complete when closed)
-                                    const previousTradeCount = updatedBotState.tradeCount || 0;
-                                    updatedBotState.tradeCount = previousTradeCount + 1;
-                                    
-                                    // Update win rate
-                                    if (netPnl > 0) {
-                                        const previousWins = Math.round(previousTradeCount * (updatedBotState.winRate || 0));
-                                        updatedBotState.winRate = (previousWins + 1) / updatedBotState.tradeCount;
-                                    } else {
-                                        const previousWins = Math.round(previousTradeCount * (updatedBotState.winRate || 0));
-                                        updatedBotState.winRate = previousWins / updatedBotState.tradeCount;
-                                    }
-                                    
-                                    // Create order record for history (exit trade)
-                                    const exitOrder: Order = {
-                                        id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-                                        symbol: posToClose.symbol,
-                                        type: posToClose.type,
-                                        size: posToClose.size,
-                                        leverage: posToClose.leverage,
-                                        pnl: netPnl,
-                                        fee: exitFee,
-                                        timestamp: Date.now(),
-                                        entryPrice: posToClose.entryPrice,
-                                        exitPrice: market.price,
-                                    };
-                                    updatedBotState.orders = [exitOrder, ...(updatedBotState.orders || [])];
-                                    
-                                    notes.push(`SUCCESS: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
-                                    // Track cooldown for informational purposes (shown in bot's next prompt)
-                                    updatedBotState.symbolCooldowns[posToClose.symbol] = Date.now() + SYMBOL_COOLDOWN_MS;
-                                }
-                            } else {
-                                notes.push(`NOTE: Position ${decision.closePositionId} not found, may have been auto-closed.`);
-                            }
-                        }
-                    }
-                }
-
-                console.log(`   📝 Notes generated:`, notes);
-                console.log(`   📊 Final state: Balance=$${updatedBotState.portfolio.balance.toFixed(2)}, Positions=${updatedBotState.portfolio.positions.length}, Orders=${updatedBotState.orders?.length || 0}, Trades=${updatedBotState.tradeCount}`);
-                
-                const newLog: BotLog = { timestamp: Date.now(), decisions, prompt, notes };
-                updatedBotState.botLogs = [newLog, ...updatedBotState.botLogs].slice(0, 50);
-                
-                setBots(current => current.map(b => b.id === bot.id ? { ...updatedBotState, isLoading: false } : b));
-                
-                // Save snapshot to database for analytics (non-blocking)
-                saveSnapshot(updatedBotState);
-            }
-        };
-    }, [bots, markets, symbolPrecisions, getAdjustedQuantity, saveSnapshot]);
-
-    useEffect(() => {
-        console.log('🔄 Trading intervals check:', {
-            isGloballyPaused,
-            botsLength: bots.length,
-            isLoading,
-            botDetails: bots.map(b => ({ id: b.id, name: b.name, isPaused: b.isPaused }))
-        });
-
-        if (isGloballyPaused || bots.length === 0 || isLoading) {
-            console.log('⏸️ Clearing trading intervals - paused or loading');
-            if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
-            if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
-            return;
-        }
-
-        console.log('▶️ Starting trading intervals...');
-        
-        // Execute first portfolio update and trading turn immediately (but in sequence)
-        (async () => {
-            console.log('📊 Loading market data first...');
-            const loadedMarkets = await botFunctionsRef.current.updatePortfolios();
-            
-            // Check if any bot has made a decision recently (within the turn interval)
-            const now = Date.now();
-            const hasRecentDecisions = bots.some(bot => 
-                bot.botLogs && bot.botLogs.length > 0 && 
-                (now - bot.botLogs[0].timestamp < TURN_INTERVAL_MS)
-            );
-            
-            if (hasRecentDecisions) {
-                const timeUntilNext = TURN_INTERVAL_MS - (now - Math.max(...bots.filter(b => b.botLogs && b.botLogs.length > 0).map(b => b.botLogs[0].timestamp)));
-                console.log(`⏳ Recent decisions detected. Next trading turn in ${Math.ceil(timeUntilNext / 1000)}s`);
+            if (response.data.notes && response.data.notes.length > 0) {
+                alert(response.data.notes.join('\n'));
             } else {
-                console.log('⚡ Executing first trading turn immediately...');
-                await botFunctionsRef.current.runTradingTurn(loadedMarkets);
+                alert('Position closed successfully');
             }
-        })();
-        
-        refreshIntervalRef.current = setInterval(() => botFunctionsRef.current.updatePortfolios(), REFRESH_INTERVAL_MS);
-        turnIntervalRef.current = setInterval(() => botFunctionsRef.current.runTradingTurn(), TURN_INTERVAL_MS);
+            
+            // State update will come via WebSocket
+        } catch (error: any) {
+            console.error('Failed to close position:', error);
+            const message = error.response?.data?.error || 'Failed to close position. Please try again.';
+            alert(message);
+        }
+    }, []);
 
-        return () => {
-            if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
-            if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
-        };
-    }, [isGloballyPaused, bots.length, isLoading]);
-
-    const resetBot = async (botId: string) => {
+    /**
+     * Reset a bot (via server API)
+     */
+    const resetBot = useCallback(async (botId: string) => {
         console.log(`🔄 resetBot called for: ${botId}`);
         
         const botToReset = bots.find(b => b.id === botId);
@@ -731,7 +142,7 @@ const useTradingBots = (isGloballyPaused: boolean) => {
         console.log('User confirmed reset, proceeding...');
         
         try {
-            // Call the backend API to reset the bot in the database
+            // Call the backend API to reset the bot
             const token = localStorage.getItem('token');
             console.log(`Calling API: ${API_BASE_URL}/api/v2/bots/${botId}/reset`);
             
@@ -754,195 +165,49 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             const result = await response.json();
             console.log(`✅ Backend reset successful:`, result);
 
-            // Clear the persisted arena state completely (best effort)
-            console.log('Clearing arena_state...');
-            fetch(`${API_BASE_URL}/api/state`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            }).then(() => console.log('Arena state cleared'))
-              .catch(err => console.warn('Could not clear arena_state:', err));
+            // Force a full page reload to ensure clean state
+            console.log('🔄 Reloading page to refresh bot state...');
+            setTimeout(() => {
+                window.location.reload();
+            }, 500);
             
         } catch (error) {
             console.error('❌ Error resetting bot:', error);
             alert(`Failed to reset bot: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            return; // Don't reload if reset failed
         }
+    }, [bots]);
 
-        // Force a full page reload to reinitialize everything from the database
-        // Do this OUTSIDE the try-catch to ensure it always happens after successful reset
-        console.log('🔄 Reloading page to refresh bot state...');
-        setTimeout(() => {
-            window.location.reload();
-        }, 500); // Small delay to ensure DELETE completes
-    };
-
-    const manualClosePosition = async (botId: string, positionId: string) => {
-        console.log(`🖐️ Manual close requested for position ${positionId} on bot ${botId}`);
-        
-        const bot = bots.find(b => b.id === botId);
-        if (!bot) {
-            console.error(`Bot ${botId} not found`);
-            return;
-        }
-
-        const posToClose = bot.portfolio.positions.find(p => p.id === positionId);
-        if (!posToClose) {
-            console.error(`Position ${positionId} not found in bot ${botId}`);
-            alert('Position not found. It may have already been closed.');
-            return;
-        }
-
-        const market = markets.find(m => m.symbol === posToClose.symbol);
-        if (!market) {
-            console.error(`Market data not found for ${posToClose.symbol}`);
-            alert('Cannot close position: Market data not available.');
-            return;
-        }
-
+    /**
+     * Force bot to process a trading turn (via server API)
+     */
+    const forceProcessTurn = useCallback(async (botId?: string) => {
         try {
-            if (bot.tradingMode === 'real') {
-                // Real trading: Place market order on exchange
-                console.log(`📤 Placing real market order to close ${posToClose.symbol} position`);
-                const rawQuantity = Math.abs((posToClose.size * posToClose.leverage) / posToClose.entryPrice);
-                const quantity = getAdjustedQuantity(posToClose.symbol, rawQuantity);
-
-                if (quantity <= 0) {
-                    console.error('Calculated quantity is 0');
-                    alert('Cannot close position: Invalid quantity calculated.');
-                    return;
-                }
-
-                await placeRealOrder({
-                    symbol: posToClose.symbol,
-                    side: posToClose.type === OrderType.LONG ? 'SELL' : 'BUY',
-                    type: 'MARKET',
-                    quantity,
-                    reduceOnly: 'true',
-                }, bot.id);
-
-                console.log(`✅ Real position closed on exchange`);
-                
-                // Update bot state - remove position and set cooldown
-                setBots(current => current.map(b => {
-                    if (b.id === botId) {
-                        return {
-                            ...b,
-                            portfolio: {
-                                ...b.portfolio,
-                                positions: b.portfolio.positions.filter(p => p.id !== positionId)
-                            },
-                            symbolCooldowns: {
-                                ...b.symbolCooldowns,
-                                [posToClose.symbol]: Date.now() + SYMBOL_COOLDOWN_MS
-                            }
-                        };
-                    }
-                    return b;
-                }));
-
-                alert(`Position closed successfully on exchange.`);
-
+            console.log(`⚡ Forcing trading turn for bot ${botId || 'all'}`);
+            
+            if (botId) {
+                await axios.post(`${API_BASE_URL}/api/bots/${botId}/force-turn`);
             } else {
-                // Paper trading: Calculate PnL and update local state
-                console.log(`📝 Closing paper position for ${posToClose.symbol}`);
-                
-                // Calculate quantity based on size, leverage, and entry price
-                const assetQuantity = (posToClose.size * posToClose.leverage) / posToClose.entryPrice;
-                
-                // Calculate PnL based on price movement and quantity
-                const unrealizedPnl = posToClose.type === OrderType.LONG
-                    ? (market.price - posToClose.entryPrice) * assetQuantity
-                    : (posToClose.entryPrice - market.price) * assetQuantity;
-                
-                const exitFee = posToClose.size * 0.03; // 3% fee on exit
-                const netPnl = unrealizedPnl - exitFee;
-                
-                // Create order record for history
-                const exitOrder: Order = {
-                    id: `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-                    symbol: posToClose.symbol,
-                    type: posToClose.type,
-                    size: posToClose.size,
-                    leverage: posToClose.leverage,
-                    pnl: netPnl,
-                    fee: exitFee,
-                    timestamp: Date.now(),
-                    entryPrice: posToClose.entryPrice,
-                    exitPrice: market.price,
-                };
-
-                // Update bot state
-                setBots(current => current.map(b => {
-                    if (b.id === botId) {
-                        const newBalance = b.portfolio.balance + posToClose.size + netPnl;
-                        const newRealizedPnl = (b.realizedPnl || 0) + netPnl;
-                        
-                        // Update win rate if profitable
-                        let newWinRate = b.winRate || 0;
-                        if (netPnl > 0 && b.tradeCount > 0) {
-                            const wins = b.tradeCount * (b.winRate || 0);
-                            newWinRate = (wins + 1) / b.tradeCount;
-                        }
-
-                        return {
-                            ...b,
-                            portfolio: {
-                                ...b.portfolio,
-                                balance: newBalance,
-                                totalValue: newBalance + b.portfolio.pnl, // Will be recalculated on next update
-                                positions: b.portfolio.positions.filter(p => p.id !== positionId)
-                            },
-                            orders: [exitOrder, ...(b.orders || [])],
-                            realizedPnl: newRealizedPnl,
-                            winRate: newWinRate,
-                            symbolCooldowns: {
-                                ...b.symbolCooldowns,
-                                [posToClose.symbol]: Date.now() + SYMBOL_COOLDOWN_MS
-                            },
-                            botLogs: [{
-                                timestamp: Date.now(),
-                                decisions: [],
-                                prompt: '',
-                                notes: [`MANUAL CLOSE: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`]
-                            }, ...(b.botLogs || [])]
-                        };
-                    }
-                    return b;
-                }));
-
-                console.log(`✅ Paper position closed. PnL: $${netPnl.toFixed(2)}`);
-                alert(`Position closed successfully!\nPnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
+                // Force turn for all bots (not currently implemented, could add if needed)
+                console.warn('Force turn for all bots not yet implemented');
             }
-
-            // Trigger portfolio update to refresh all data
-            if (botFunctionsRef.current.updatePortfolios) {
-                await botFunctionsRef.current.updatePortfolios();
-            }
-
-        } catch (error: any) {
-            console.error('❌ Error manually closing position:', error);
-            if (error.message && error.message.includes('ReduceOnly Order is rejected')) {
-                alert('Position no longer exists on the exchange. It may have been auto-closed by stop-loss or liquidation.');
-            } else {
-                alert(`Failed to close position: ${error.message || 'Unknown error'}`);
-            }
+            
+            // State update will come via WebSocket
+        } catch (error) {
+            console.error('Failed to force trading turn:', error);
+            alert('Failed to force trading turn. Please try again.');
         }
-    };
+    }, []);
 
-    const toggleBotPause = (botId: string) => {
-        setBots(current => current.map(b => 
-            b.id === botId ? { ...b, isPaused: !b.isPaused } : b
-        ));
+    return { 
+        bots, 
+        markets, 
+        isLoading, 
+        manualClosePosition, 
+        resetBot, 
+        toggleBotPause, 
+        forceProcessTurn, 
+        initialBalanceRef 
     };
-
-    const forceProcessTurn = async (botId?: string) => {
-        if (botFunctionsRef.current.runTradingTurn) {
-            // If botId is provided, force turn for just that bot; otherwise for all bots
-            await botFunctionsRef.current.runTradingTurn(undefined, botId);
-        }
-    };
-
-    return { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause, forceProcessTurn, initialBalanceRef };
 };
 
 export default useTradingBots;

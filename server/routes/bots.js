@@ -154,7 +154,7 @@ router.put('/:id',
   body('is_paused').optional().isBoolean().withMessage('is_paused must be boolean'),
   body('avatar_image').optional().isString().withMessage('avatar_image must be a string'),
   validateRequest,
-  (req, res) => {
+  async (req, res) => {
     try {
       const bot = db.getBot(req.params.id);
       if (!bot) {
@@ -180,6 +180,17 @@ router.put('/:id',
         details: { updates: req.body },
         ip_address: req.ip
       });
+      
+      // Reload bot configuration in BotManager (hot reload)
+      if (req.app.locals.botManager) {
+        try {
+          await req.app.locals.botManager.reloadBotConfig(req.params.id);
+          console.log(`✅ Hot-reloaded bot configuration for ${req.params.id}`);
+        } catch (reloadError) {
+          console.warn(`⚠️ Failed to hot-reload bot config:`, reloadError.message);
+          // Don't fail the request - database was updated successfully
+        }
+      }
       
       res.json(updatedBot);
     } catch (error) {
@@ -266,11 +277,10 @@ router.post('/:id/pause',
  * NOTE: Only works for paper trading bots
  */
 router.post('/:id/reset',
-  authenticateToken,
-  requireRole('user'),
+  optionalAuth, // Allow without auth for local instances
   param('id').notEmpty().withMessage('Bot ID is required'),
   validateRequest,
-  (req, res) => {
+  async (req, res) => {
     try {
       const bot = db.getBot(req.params.id);
       if (!bot) {
@@ -319,6 +329,19 @@ router.post('/:id/reset',
         console.log('Note: Could not clear arena_state:', err.message);
       }
       
+      // 7. Reset the bot in BotManager's in-memory state
+      try {
+        const botManager = req.app.locals.botManager;
+        if (botManager) {
+          await botManager.resetBot(req.params.id);
+          console.log('✅ Reset bot in BotManager memory');
+        } else {
+          console.warn('⚠️ BotManager not available, bot state may be stale until server restart');
+        }
+      } catch (err) {
+        console.warn('⚠️ Failed to reset bot in BotManager:', err.message);
+      }
+      
       // Create audit log
       createAuditLog({
         event_type: 'bot_reset',
@@ -329,7 +352,7 @@ router.post('/:id/reset',
         ip_address: req.ip
       });
       
-      console.log(`✅ Bot ${req.params.id} reset successfully`);
+      console.log(`✅ Bot ${req.params.id} reset successfully (database + memory)`);
       res.json({ success: true, message: 'Bot reset successfully', initial_balance: initialBalance });
     } catch (error) {
       console.error('Error resetting bot:', error);

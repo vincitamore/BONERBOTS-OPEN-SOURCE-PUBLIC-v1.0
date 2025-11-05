@@ -1,5 +1,5 @@
 // components/Dashboard.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import useTradingBots from '../hooks/useTradingBot';
 import MarketPrices from './MarketPrices';
 import PerformanceChart from './PerformanceChart';
@@ -10,10 +10,7 @@ import PositionsTable from './PositionsTable';
 import OrderHistory from './OrderHistory';
 import BotStatus from './BotStatus';
 import InfoPane from './InfoPane';
-import { updateState } from '../services/stateService';
-// Fix: Imported SerializableBotState for correct type casting.
-import { BotState, ArenaState, ModalContentType, SerializableBotState } from '../types';
-import { PAPER_BOT_INITIAL_BALANCE, LIVE_BOT_INITIAL_BALANCE } from '../constants';
+import { BotState, ModalContentType } from '../types';
 
 interface DashboardProps {
   isPaused: boolean;
@@ -28,18 +25,9 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
   const [modalContent, setModalContent] = useState<ModalContentType | null>(null);
 
   useEffect(() => {
+    // The frontend is now a passive viewer - broadcasting is handled server-side
     onBroadcastingChange(!isLoading && bots.length > 0);
   }, [isLoading, bots, onBroadcastingChange]);
-
-  useEffect(() => {
-    const sanitizeBotsForBroadcast = (botsToSanitize: BotState[]): SerializableBotState[] => {
-        return botsToSanitize.map(({ getDecision, ...rest }) => rest);
-    };
-
-    if (bots.length > 0 && markets.length > 0) {
-      updateState({ bots: sanitizeBotsForBroadcast(bots), marketData: markets });
-    }
-  }, [bots, markets]);
 
   const handleOpenModal = (bot: BotState, content: ModalContentType) => {
     setSelectedBot(bot);
@@ -104,7 +92,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
 
   const sortedBots = [...bots].sort((a, b) => b.portfolio.totalValue - a.portfolio.totalValue);
   const liveBot = bots.find(b => b.tradingMode === 'real');
-  const chartInitialBalance = liveBot ? initialBalanceRef.current.get(liveBot.id) : PAPER_BOT_INITIAL_BALANCE;
+  const chartInitialBalance = liveBot ? liveBot.initialBalance : (bots[0]?.initialBalance ?? 10000);
 
   return (
     <div className="space-y-6">
@@ -122,7 +110,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
             mode="broadcast"
             bot={bot} 
             rank={index + 1} 
-            initialBalance={initialBalanceRef.current.get(bot.id) ?? (bot.tradingMode === 'real' ? LIVE_BOT_INITIAL_BALANCE : PAPER_BOT_INITIAL_BALANCE)}
+            initialBalance={bot.initialBalance}
             onOpenModal={(content) => handleOpenModal(bot, content)}
             onReset={() => resetBot(bot.id)}
             onTogglePause={() => toggleBotPause(bot.id)}

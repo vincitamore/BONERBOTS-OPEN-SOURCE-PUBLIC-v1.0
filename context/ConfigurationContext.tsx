@@ -201,6 +201,12 @@ export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       if (!response.ok) {
         const errorData = await response.json();
+        // Show detailed validation errors if available
+        if (errorData.details && Array.isArray(errorData.details)) {
+          const detailsMsg = errorData.details.map((d: any) => `${d.field}: ${d.message}`).join(', ');
+          console.error('Validation errors:', errorData.details);
+          throw new Error(`${errorData.error}: ${detailsMsg}`);
+        }
         throw new Error(errorData.error || 'Failed to update bot');
       }
       const updatedBot = await response.json();

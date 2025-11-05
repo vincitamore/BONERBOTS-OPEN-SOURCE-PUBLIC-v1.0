@@ -75,7 +75,7 @@ export const BotsPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
+    <div className="mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6" style={{ maxWidth: '1400px' }}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div className="min-w-0 flex-1">
@@ -86,7 +86,7 @@ export const BotsPage: React.FC = () => {
         </div>
         <button
           onClick={() => navigate('/config/bots/new')}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-lg"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -98,23 +98,23 @@ export const BotsPage: React.FC = () => {
 
       {/* Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Total Bots</div>
-          <div className="text-2xl font-bold text-gray-100 mt-1">{activeBots.length}</div>
+        <div className="bg-gray-800/50 rounded-lg p-5 border border-gray-700/50 backdrop-blur-sm">
+          <div className="text-gray-400 text-sm font-medium">Total Bots</div>
+          <div className="text-3xl font-bold text-gray-100 mt-2">{activeBots.length}</div>
         </div>
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Paper Trading</div>
-          <div className="text-2xl font-bold text-blue-400 mt-1">{paperBots.length}</div>
+        <div className="bg-gray-800/50 rounded-lg p-5 border border-gray-700/50 backdrop-blur-sm">
+          <div className="text-gray-400 text-sm font-medium">Paper Trading</div>
+          <div className="text-3xl font-bold text-blue-400 mt-2">{paperBots.length}</div>
         </div>
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Live Trading</div>
-          <div className="text-2xl font-bold text-green-400 mt-1">{liveBots.length}</div>
+        <div className="bg-gray-800/50 rounded-lg p-5 border border-gray-700/50 backdrop-blur-sm">
+          <div className="text-gray-400 text-sm font-medium">Live Trading</div>
+          <div className="text-3xl font-bold text-emerald-400 mt-2">{liveBots.length}</div>
         </div>
       </div>
 
       {/* Bots List */}
       {activeBots.length === 0 ? (
-        <div className="bg-gray-800 rounded-lg p-12 text-center border border-gray-700">
+        <div className="bg-gray-800/50 rounded-lg p-12 text-center border border-gray-700/50 backdrop-blur-sm">
           <svg
             className="w-16 h-16 text-gray-600 mx-auto mb-4"
             fill="none"
@@ -134,62 +134,68 @@ export const BotsPage: React.FC = () => {
           </p>
           <button
             onClick={() => navigate('/config/bots/new')}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors shadow-lg"
           >
             Create Your First Bot
           </button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {activeBots.map((bot) => (
             <div
               key={bot.id}
-              className="bg-gray-800 rounded-lg p-4 sm:p-6 border border-gray-700 hover:border-gray-600 transition-colors"
+              className="bg-gray-800/50 rounded-lg p-5 border border-gray-700/50 hover:border-gray-600/50 transition-all hover:shadow-lg backdrop-blur-sm"
             >
-              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+              <div className="flex flex-col gap-4">
+                {/* Bot Header */}
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <h3 className="text-lg sm:text-xl font-semibold text-gray-100">{bot.name}</h3>
+                    <h3 className="text-lg font-semibold text-gray-100">{bot.name}</h3>
                     <span
-                      className={`px-2 py-1 rounded text-xs font-medium shrink-0 ${
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-medium shrink-0 ${
                         bot.trading_mode === 'paper'
-                          ? 'bg-blue-900/50 text-blue-300'
-                          : 'bg-green-900/50 text-green-300'
+                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                       }`}
                     >
-                      {bot.trading_mode === 'paper' ? 'Paper Trading' : 'Live Trading'}
+                      {bot.trading_mode === 'paper' ? 'Paper' : 'Live'}
                     </span>
                     {bot.is_paused && (
-                      <span className="px-2 py-1 rounded text-xs font-medium bg-orange-900/50 text-orange-300 shrink-0">
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
                         Paused
                       </span>
                     )}
                   </div>
-                  <p className="text-gray-400 text-sm mb-3 line-clamp-2">{bot.prompt}</p>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-sm text-gray-500">
-                    <span>
-                      <span className="font-medium">Provider:</span> {bot.provider_name || 'Unknown'}
+                  <p className="text-gray-400 text-sm mb-3 line-clamp-2 leading-relaxed">{bot.prompt}</p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                      </svg>
+                      <span className="font-medium">{bot.provider_name || 'Unknown'}</span>
                     </span>
+                    <span className="text-gray-600">•</span>
                     <span>
-                      <span className="font-medium">Created:</span>{' '}
                       {new Date(bot.created_at).toLocaleDateString()}
                     </span>
                   </div>
                 </div>
-                <div className="flex flex-row lg:flex-col gap-2 shrink-0">
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-700/50">
                   <button
                     onClick={() => navigate(`/config/bots/${bot.id}`)}
-                    className="flex-1 lg:flex-initial px-3 sm:px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm font-medium transition-colors"
+                    className="flex-1 min-w-[100px] px-4 py-2 bg-gray-700/50 hover:bg-gray-600/50 text-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-600/30"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => handlePauseToggle(bot.id, bot.is_paused)}
                     disabled={actionLoading === bot.id}
-                    className={`flex-1 lg:flex-initial px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`flex-1 min-w-[100px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                       bot.is_paused
-                        ? 'bg-green-600 hover:bg-green-700 text-white'
-                        : 'bg-orange-600 hover:bg-orange-700 text-white'
+                        ? 'bg-emerald-600/80 hover:bg-emerald-600 text-white border border-emerald-500/30'
+                        : 'bg-gray-700/50 hover:bg-gray-600/50 text-gray-100 border border-gray-600/30'
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     {actionLoading === bot.id ? '...' : bot.is_paused ? 'Resume' : 'Pause'}
@@ -198,7 +204,7 @@ export const BotsPage: React.FC = () => {
                     <button
                       onClick={() => handleReset(bot.id, bot.name)}
                       disabled={actionLoading === bot.id}
-                      className="flex-1 lg:flex-initial px-3 sm:px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 min-w-[100px] px-4 py-2 bg-blue-600/80 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-blue-500/30"
                     >
                       {actionLoading === bot.id ? '...' : 'Reset'}
                     </button>
@@ -206,7 +212,7 @@ export const BotsPage: React.FC = () => {
                   <button
                     onClick={() => handleDelete(bot.id, bot.name)}
                     disabled={actionLoading === bot.id}
-                    className="flex-1 lg:flex-initial px-3 sm:px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 min-w-[100px] px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-red-500/30"
                   >
                     {actionLoading === bot.id ? '...' : 'Delete'}
                   </button>
