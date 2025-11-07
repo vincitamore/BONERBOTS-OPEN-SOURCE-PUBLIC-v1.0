@@ -6,12 +6,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { useConfiguration } from '../../context/ConfigurationContext';
+import { useToast } from '../../context/ToastContext';
 import { TextInput } from '../../components/forms/TextInput';
 import { PasswordInput } from '../../components/forms/PasswordInput';
 import { SelectDropdown, SelectOption } from '../../components/forms/SelectDropdown';
 
 export const CredentialsPage: React.FC = () => {
   const { bots, wallets, fetchWallets, createWallet, updateWallet, deleteWallet, loading } = useConfiguration();
+  const { showToast, confirm } = useToast();
 
   const [showModal, setShowModal] = useState(false);
   const [editingWallet, setEditingWallet] = useState<number | null>(null);
@@ -162,6 +164,7 @@ export const CredentialsPage: React.FC = () => {
         });
       }
 
+      showToast('Credentials saved successfully!', 'success');
       closeModal();
       // Refresh wallets
       if (selectedBotFilter === 'all') {
@@ -170,7 +173,7 @@ export const CredentialsPage: React.FC = () => {
         await fetchWallets(selectedBotFilter);
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to save credentials');
+      showToast(error instanceof Error ? error.message : 'Failed to save credentials', 'error');
     } finally {
       setSaving(false);
     }
@@ -178,13 +181,18 @@ export const CredentialsPage: React.FC = () => {
 
   // Delete wallet
   const handleDelete = async (walletId: number, botName: string, exchange: string) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the ${exchange} credentials for "${botName}"? This action cannot be undone.`
-    );
+    const confirmed = await confirm({
+      title: 'Delete Credentials',
+      message: `Are you sure you want to delete the ${exchange} credentials for "${botName}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger',
+    });
     if (!confirmed) return;
 
     try {
       await deleteWallet(walletId);
+      showToast('Credentials deleted successfully.', 'success');
       // Refresh wallets
       if (selectedBotFilter === 'all') {
         await fetchWallets();
@@ -192,7 +200,7 @@ export const CredentialsPage: React.FC = () => {
         await fetchWallets(selectedBotFilter);
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to delete credentials');
+      showToast(error instanceof Error ? error.message : 'Failed to delete credentials', 'error');
     }
   };
 

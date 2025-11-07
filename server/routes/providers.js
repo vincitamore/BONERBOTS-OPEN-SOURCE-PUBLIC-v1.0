@@ -16,15 +16,21 @@ const router = express.Router();
 
 /**
  * GET /api/providers - List all LLM providers
+ * MULTI-TENANT: Returns only providers owned by authenticated user (unless admin)
  */
 router.get('/',
-  optionalAuth,
+  authenticateToken,
   query('active').optional().isBoolean().withMessage('Active must be a boolean'),
   query('provider_type').optional().isIn(['openai', 'anthropic', 'gemini', 'grok', 'local', 'custom']).withMessage('Invalid provider type'),
   validateRequest,
   (req, res) => {
     try {
       const filters = {};
+      
+      // CRITICAL: Filter by user_id unless admin
+      if (req.user.role !== 'admin') {
+        filters.user_id = req.user.userId;
+      }
       
       if (req.query.active !== undefined) {
         filters.active = req.query.active === 'true';
@@ -37,7 +43,7 @@ router.get('/',
       let providers = db.getProviders(filters);
       
       // Redact API keys for non-admin users
-      if (!req.user || req.user.role !== 'admin') {
+      if (req.user.role !== 'admin') {
         providers = providers.map(p => ({
           ...p,
           api_key_encrypted: p.api_key_encrypted ? redact(p.id.toString()) : null
@@ -54,21 +60,23 @@ router.get('/',
 
 /**
  * GET /api/providers/:id - Get specific provider
+ * MULTI-TENANT: Returns provider only if owned by authenticated user (unless admin)
  */
 router.get('/:id',
-  optionalAuth,
+  authenticateToken,
   param('id').isInt().withMessage('Provider ID must be an integer'),
   validateRequest,
   (req, res) => {
     try {
-      let provider = db.getProvider(parseInt(req.params.id));
+      const userId = req.user.role === 'admin' ? null : req.user.userId;
+      let provider = db.getProvider(parseInt(req.params.id), userId);
       
       if (!provider) {
-        return res.status(404).json({ error: 'Provider not found' });
+        return res.status(404).json({ error: 'Provider not found or access denied' });
       }
       
       // Redact API key for non-admin users
-      if (!req.user || req.user.role !== 'admin') {
+      if (req.user.role !== 'admin') {
         provider = {
           ...provider,
           api_key_encrypted: provider.api_key_encrypted ? redact(provider.id.toString()) : null
@@ -88,7 +96,7 @@ router.get('/:id',
  */
 router.post('/',
   authenticateToken,
-  requireRole('admin'),
+  requireRole('user'),
   body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Name must be 1-100 characters'),
   body('provider_type').isIn(['openai', 'anthropic', 'gemini', 'grok', 'local', 'custom']).withMessage('Invalid provider type'),
   body('api_endpoint').trim().isLength({ min: 1 }).withMessage('API endpoint is required')
@@ -106,19 +114,21 @@ router.post('/',
   validateRequest,
   (req, res) => {
     try {
-      // Check if provider name already exists
-      const existing = db.getProviders().find(p => p.name === req.body.name);
+      // Check if provider name already exists for this user
+      const userId = req.user.role === 'admin' ? null : req.user.userId;
+      const existing = db.getProviders({ user_id: userId }).find(p => p.name === req.body.name);
       if (existing) {
         return res.status(409).json({ error: 'Provider with this name already exists' });
       }
       
-      // Encrypt API key if provided
+      // Encrypt API key if provided (per-user encryption)
       let apiKeyEncrypted = null;
       if (req.body.api_key) {
-        apiKeyEncrypted = encrypt(req.body.api_key);
+        apiKeyEncrypted = encrypt(req.body.api_key, req.user.userId);
       }
       
       const provider = db.createProvider({
+        user_id: req.user.userId, // CRITICAL: Set user_id from authenticated user
         name: req.body.name,
         provider_type: req.body.provider_type,
         api_endpoint: req.body.api_endpoint,
@@ -133,7 +143,7 @@ router.post('/',
         event_type: 'provider_created',
         entity_type: 'provider',
         entity_id: provider.id.toString(),
-        user_id: req.user?.userId,
+        user_id: req.user.userId,
         details: { provider_name: provider.name, provider_type: provider.provider_type },
         ip_address: req.ip
       });
@@ -157,7 +167,7 @@ router.post('/',
  */
 router.put('/:id',
   authenticateToken,
-  requireRole('admin'),
+  requireRole('user'),
   param('id').isInt().withMessage('Provider ID must be an integer'),
   body('name').optional().trim().isLength({ min: 1, max: 100 }).withMessage('Name must be 1-100 characters'),
   body('provider_type').optional().isIn(['openai', 'anthropic', 'gemini', 'grok', 'local', 'custom']).withMessage('Invalid provider type'),
@@ -177,21 +187,22 @@ router.put('/:id',
   (req, res) => {
     try {
       const providerId = parseInt(req.params.id);
-      const provider = db.getProvider(providerId);
+      const userId = req.user.role === 'admin' ? null : req.user.userId;
+      const provider = db.getProvider(providerId, userId);
       
       if (!provider) {
-        return res.status(404).json({ error: 'Provider not found' });
+        return res.status(404).json({ error: 'Provider not found or access denied' });
       }
       
       const updates = { ...req.body };
       
       // If updating API key, encrypt it
       if (updates.api_key) {
-        updates.api_key_encrypted = encrypt(updates.api_key);
+        updates.api_key_encrypted = encrypt(updates.api_key, req.user.userId);
         delete updates.api_key;
       }
       
-      const updatedProvider = db.updateProvider(providerId, updates);
+      const updatedProvider = db.updateProvider(providerId, updates, userId);
       
       // Create audit log
       createAuditLog({

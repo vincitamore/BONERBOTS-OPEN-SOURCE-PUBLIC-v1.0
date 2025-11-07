@@ -19,6 +19,7 @@ const auditRoutes = require('./audit');
 const router = express.Router();
 
 // Mount all route modules
+// Note: admin and leaderboard routes are mounted directly in server.js
 router.use('/bots', botsRoutes);
 router.use('/providers', providersRoutes);
 router.use('/wallets', walletsRoutes);

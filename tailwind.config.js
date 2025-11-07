@@ -10,6 +10,7 @@ export default {
         'marquee': 'marquee 30s linear infinite',
         'marquee-slow': 'marquee-slow 45s linear infinite',
         'pulse-bg': 'pulse-bg 1s ease-out',
+        'tooltip-in': 'tooltip-in 0.15s ease-out',
       },
       keyframes: {
         marquee: {
@@ -23,6 +24,10 @@ export default {
         'pulse-bg': {
           '0%': { backgroundColor: 'rgba(79, 70, 229, 0.2)' },
           '100%': { backgroundColor: 'transparent' },
+        },
+        'tooltip-in': {
+          '0%': { opacity: '0', transform: 'scale(0.95)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
         },
       },
     },

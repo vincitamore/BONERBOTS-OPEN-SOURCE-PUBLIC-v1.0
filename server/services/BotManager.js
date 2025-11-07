@@ -10,6 +10,8 @@ const axios = require('axios');
 const Database = require('better-sqlite3');
 const path = require('path');
 const { executeSandboxTool, resetSandbox } = require('./sandboxService');
+const { manageHistorySize, calculateHistoryTokens } = require('./historySummarizer');
+const relationalDb = require('../database/relational');
 
 // Constants for non-configurable values
 const MAX_VALUE_HISTORY = 300; // Keep last 300 data points
@@ -21,7 +23,9 @@ class BotManager {
   constructor(config, websocketServer) {
     this.config = config;
     this.wsServer = websocketServer;
-    this.bots = new Map(); // botId -> botState
+    this.bots = new Map(); // userId -> Map<botId, botState> (multi-tenant structure)
+    this.userBotOrder = []; // Array of userIds for round-robin scheduling
+    this.currentUserIndex = 0; // Current position in round-robin
     this.markets = [];
     this.symbolPrecisions = new Map();
     this.initialBalances = new Map();
@@ -33,7 +37,7 @@ class BotManager {
     // Load dynamic settings from database
     this.settings = null;
     
-    console.log('🤖 BotManager initialized');
+    console.log('🤖 BotManager initialized (Multi-Tenant Mode)');
   }
 
   /**
@@ -212,15 +216,14 @@ class BotManager {
         return { success: false, message: 'Bot not found' };
       }
       
-      // Find existing bot in memory
-      const existingBotIndex = this.bots.findIndex(b => b.id === botId);
+      // Find existing bot in memory (multi-tenant aware)
+      const existingBot = this.getBot(botId);
       
-      if (existingBotIndex === -1) {
+      if (!existingBot) {
         console.warn(`⚠️ Bot ${botId} not found in active bots`);
         return { success: false, message: 'Bot not in active memory' };
       }
       
-      const existingBot = this.bots[existingBotIndex];
       const provider = (config.provider_type === 'gemini' || config.provider_type === 'grok') 
         ? config.provider_type 
         : 'gemini';
@@ -237,7 +240,12 @@ class BotManager {
         isPaused: config.is_paused
       };
       
-      this.bots[existingBotIndex] = updatedBot;
+      // Update in the user's bot map
+      const userId = existingBot.userId;
+      const userBots = this.bots.get(userId);
+      if (userBots) {
+        userBots.set(botId, updatedBot);
+      }
       
       // Broadcast updated state
       this.broadcastState();
@@ -256,28 +264,30 @@ class BotManager {
   }
 
   /**
-   * Load bot configurations from database
+   * Load bot configurations from database (Multi-Tenant)
+   * Groups bots by user for fair scheduling
    */
   async loadBots() {
-    console.log('🤖 Loading bot configurations from database...');
+    console.log('🤖 Loading bot configurations from database (Multi-Tenant)...');
     
     const dbPath = path.join(__dirname, '..', '..', 'data', 'arena.db');
     const db = new Database(dbPath, { readonly: true });
     
     try {
-      // Fetch active bots and their providers
+      // Fetch active bots and their providers WITH user_id
       const botsQuery = db.prepare(`
         SELECT 
           b.id, b.name, b.prompt, b.trading_mode, 
-          b.is_paused, b.avatar_image,
+          b.is_paused, b.avatar_image, b.user_id, b.history_summary,
           p.id as provider_id, p.name as provider_name, p.provider_type
         FROM bots b
         JOIN llm_providers p ON b.provider_id = p.id
-        WHERE b.is_active = 1
+        WHERE b.is_active = 1 AND b.user_id IS NOT NULL
+        ORDER BY b.user_id, b.id
       `);
       
       const botConfigs = botsQuery.all();
-      console.log(`📝 Found ${botConfigs.length} active bots`);
+      console.log(`📝 Found ${botConfigs.length} active bots across multiple users`);
       
       if (botConfigs.length === 0) {
         console.warn('⚠️ No active bots found in database');
@@ -296,14 +306,91 @@ class BotManager {
         console.log('ℹ️ No saved state found, starting fresh');
       }
       
-      // Initialize bots
+      // Group bots by user
+      const userBotsMap = new Map(); // Temporary grouping
       for (const config of botConfigs) {
+        if (!userBotsMap.has(config.user_id)) {
+          userBotsMap.set(config.user_id, []);
+        }
+        userBotsMap.get(config.user_id).push(config);
+      }
+      
+      console.log(`👥 Loading bots for ${userBotsMap.size} users...`);
+      
+      // Initialize bots per user
+      let totalBots = 0;
+      for (const [userId, userBotConfigs] of userBotsMap.entries()) {
+        console.log(`   👤 Loading ${userBotConfigs.length} bots for user ${userId.substring(0, 8)}...`);
+        
+        // Create user bot map if it doesn't exist
+        if (!this.bots.has(userId)) {
+          this.bots.set(userId, new Map());
+        }
+        
+        const userBots = this.bots.get(userId);
+        
+        for (const config of userBotConfigs) {
         const provider = (config.provider_type === 'gemini' || config.provider_type === 'grok') 
           ? config.provider_type 
           : 'gemini';
         
         // Check if we have saved state for this bot
         const savedBot = savedState?.bots?.find(b => b.id === config.id);
+        
+        // Load data from relational database
+        let dbTrades = [];
+        let dbPositions = [];
+        let dbDecisions = [];
+        
+        try {
+          // Load recent trades (last 100)
+          dbTrades = relationalDb.getTrades(config.id, { user_id: config.user_id, limit: 100 });
+          
+          // Load open positions
+          dbPositions = relationalDb.getPositions(config.id, 'open', config.user_id);
+          
+          // Load recent decisions (last 50)
+          dbDecisions = relationalDb.getBotDecisions(config.id, 50, config.user_id);
+          
+          console.log(`      📊 Loaded from DB: ${dbTrades.length} trades, ${dbPositions.length} positions, ${dbDecisions.length} decisions`);
+        } catch (dbError) {
+          console.warn(`      ⚠️ Failed to load database data for ${config.name}:`, dbError.message);
+          // Continue with empty arrays - will fall back to savedBot data if available
+        }
+        
+        // Transform database data to in-memory format
+        const orders = dbTrades.map(trade => ({
+          id: trade.id,
+          symbol: trade.symbol,
+          type: trade.trade_type,
+          size: trade.size,
+          leverage: trade.leverage,
+          pnl: trade.pnl,
+          fee: trade.fee,
+          timestamp: new Date(trade.executed_at).getTime(),
+          entryPrice: trade.entry_price,
+          exitPrice: trade.exit_price || 0
+        }));
+        
+        const positions = dbPositions.map(pos => ({
+          id: pos.id,
+          symbol: pos.symbol,
+          type: pos.position_type,
+          entryPrice: pos.entry_price,
+          size: pos.size,
+          leverage: pos.leverage,
+          liquidationPrice: pos.liquidation_price,
+          stopLoss: pos.stop_loss,
+          takeProfit: pos.take_profit,
+          pnl: pos.unrealized_pnl || 0
+        }));
+        
+        const botLogs = dbDecisions.map(decision => ({
+          timestamp: new Date(decision.timestamp).getTime(),
+          decisions: JSON.parse(decision.decisions_json || '[]'),
+          prompt: decision.prompt_sent,
+          notes: JSON.parse(decision.notes_json || '[]')
+        }));
         
         let botState;
         // Determine initial balance based on trading mode
@@ -312,9 +399,12 @@ class BotManager {
           : this.settings.paper_bot_initial_balance;
         
         if (savedBot) {
-          console.log(`   Resuming ${config.name} from saved state`);
+            console.log(`      Resuming ${config.name} from saved state + database`);
           botState = {
             ...savedBot,
+              userId: config.user_id, // Add userId to bot state
+              provider_id: config.provider_id, // Add provider_id for history summarization
+              history_summary: config.history_summary, // Load history summary from database
             tradingMode: config.trading_mode,
             isPaused: config.is_paused,
             providerName: config.provider_name,
@@ -323,34 +413,44 @@ class BotManager {
             name: config.name,
             avatarUrl: config.avatar_image,
             isLoading: false,
-            initialBalance, // Include for frontend PnL% calculation
-            symbolCooldowns: savedBot.symbolCooldowns || {}
+              initialBalance,
+            symbolCooldowns: savedBot.symbolCooldowns || {},
+            // Override with database data
+            orders: orders.length > 0 ? orders : (savedBot.orders || []),
+            botLogs: botLogs.length > 0 ? botLogs : (savedBot.botLogs || []),
+            portfolio: {
+              ...savedBot.portfolio,
+              positions: positions.length > 0 ? positions : (savedBot.portfolio?.positions || [])
+            }
           };
         } else {
-          console.log(`   Creating fresh state for ${config.name}`);
+            console.log(`      Creating fresh state for ${config.name} (using database data if available)`);
           
           botState = {
             id: config.id,
+              userId: config.user_id, // Add userId to bot state
+              provider_id: config.provider_id, // Add provider_id for history summarization
+              history_summary: config.history_summary, // Load history summary from database
             name: config.name,
             prompt: config.prompt,
             provider,
             providerName: config.provider_name,
             avatarUrl: config.avatar_image,
             tradingMode: config.trading_mode,
-            initialBalance, // Include for frontend PnL% calculation
+              initialBalance,
             portfolio: {
               balance: initialBalance,
               pnl: 0,
               totalValue: initialBalance,
-              positions: []
+              positions: positions  // Use database positions
             },
-            orders: [],
-            botLogs: [],
+            orders: orders,  // Use database trades
+            botLogs: botLogs,  // Use database decisions
             valueHistory: [{ timestamp: Date.now(), value: initialBalance }],
             isLoading: false,
             isPaused: config.is_paused,
             realizedPnl: 0,
-            tradeCount: 0,
+            tradeCount: orders.length,  // Count from database trades
             winRate: 0,
             symbolCooldowns: {}
           };
@@ -359,7 +459,7 @@ class BotManager {
         // For live trading bots, sync with exchange
         if (config.trading_mode === 'real') {
           try {
-            console.log(`   [${config.name}] Syncing with live exchange...`);
+              console.log(`      [${config.name}] Syncing with live exchange...`);
             const realPortfolio = await this.getRealAccountState(config.id);
             const realOrders = await this.getRealTradeHistory(config.id);
             const realizedPnl = realOrders.reduce((acc, o) => acc + o.pnl, 0);
@@ -370,23 +470,112 @@ class BotManager {
             botState.valueHistory = [{ timestamp: Date.now(), value: realPortfolio.totalValue }];
             
             this.initialBalances.set(config.id, this.settings.live_bot_initial_balance);
-            console.log(`   ✅ [${config.name}] Synced with exchange`);
+              console.log(`      ✅ [${config.name}] Synced with exchange`);
           } catch (error) {
-            console.warn(`   ⚠️ [${config.name}] Failed to sync with exchange:`, error.message);
+              console.warn(`      ⚠️ [${config.name}] Failed to sync with exchange:`, error.message);
             this.initialBalances.set(config.id, this.settings.live_bot_initial_balance);
           }
         } else {
           this.initialBalances.set(config.id, this.settings.paper_bot_initial_balance);
         }
         
-        this.bots.set(config.id, botState);
-        console.log(`   ✅ Loaded bot: ${config.name} (${config.trading_mode} mode, ${config.is_paused ? 'PAUSED' : 'ACTIVE'})`);
+          userBots.set(config.id, botState);
+          totalBots++;
+          console.log(`      ✅ Loaded bot: ${config.name} (${config.trading_mode} mode, ${config.is_paused ? 'PAUSED' : 'ACTIVE'})`);
+      }
       }
       
-      console.log(`✅ Initialized ${this.bots.size} bots`);
+      // Initialize round-robin scheduling array
+      this.userBotOrder = Array.from(this.bots.keys());
+      this.currentUserIndex = 0;
+      
+      console.log(`✅ Initialized ${totalBots} bots across ${this.bots.size} users`);
     } finally {
       db.close();
     }
+  }
+
+  /**
+   * Helper: Get all bots across all users
+   * @returns {Array} Array of all bot states
+   */
+  getAllBots() {
+    const allBots = [];
+    for (const userBots of this.bots.values()) {
+      for (const bot of userBots.values()) {
+        allBots.push(bot);
+      }
+    }
+    return allBots;
+  }
+
+  /**
+   * Helper: Get a specific bot by ID
+   * @param {string} botId - The bot ID to find
+   * @returns {object|null} Bot state or null if not found
+   */
+  getBot(botId) {
+    for (const userBots of this.bots.values()) {
+      if (userBots.has(botId)) {
+        return userBots.get(botId);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Helper: Get user's bots
+   * @param {string} userId - The user ID
+   * @returns {Map} Map of user's bots or empty Map
+   */
+  getUserBots(userId) {
+    return this.bots.get(userId) || new Map();
+  }
+
+  /**
+   * Helper: Get next bot for execution (round-robin across users)
+   * Ensures fair distribution of bot execution time across all users
+   * @returns {object|null} Next bot to execute or null if none available
+   */
+  getNextBotForExecution() {
+    if (this.userBotOrder.length === 0) {
+      return null;
+    }
+
+    // Try each user in round-robin order
+    const startIndex = this.currentUserIndex;
+    let attempts = 0;
+
+    while (attempts < this.userBotOrder.length) {
+      const userId = this.userBotOrder[this.currentUserIndex];
+      const userBots = this.bots.get(userId);
+
+      if (userBots && userBots.size > 0) {
+        // Find an active (non-paused) bot for this user
+        for (const bot of userBots.values()) {
+          if (!bot.isPaused && !bot.isLoading) {
+            // Move to next user for next iteration
+            this.currentUserIndex = (this.currentUserIndex + 1) % this.userBotOrder.length;
+            return bot;
+          }
+        }
+      }
+
+      // Move to next user
+      this.currentUserIndex = (this.currentUserIndex + 1) % this.userBotOrder.length;
+      attempts++;
+    }
+
+    return null; // No active bots found
+  }
+
+  /**
+   * Helper: Get all bots for a trading turn
+   * Returns all active (non-paused) bots from all users
+   * @returns {Array} Array of bot objects
+   */
+  getNextBotsForTurn() {
+    return this.getAllBots().filter(bot => !bot.isPaused && !bot.isLoading);
   }
 
   /**
@@ -404,7 +593,8 @@ class BotManager {
       const now = Date.now();
       let hasRecentDecisions = false;
       
-      for (const bot of this.bots.values()) {
+      const allBots = this.getAllBots();
+      for (const bot of allBots) {
         if (bot.botLogs && bot.botLogs.length > 0) {
           const lastDecision = bot.botLogs[0].timestamp;
           if (now - lastDecision < turnIntervalMs) {
@@ -430,7 +620,43 @@ class BotManager {
   }
 
   /**
-   * Get market data (filtered by trading_symbols setting)
+   * Get trading symbols allowed for a specific bot
+   * Returns bot-specific symbols if configured, otherwise falls back to global settings
+   */
+  getTradingSymbolsForBot(bot) {
+    // Check if bot has custom trading symbols configured
+    if (bot.trading_symbols) {
+      try {
+        const symbols = JSON.parse(bot.trading_symbols);
+        if (Array.isArray(symbols) && symbols.length > 0) {
+          return symbols;
+        }
+      } catch (e) {
+        console.error(`Failed to parse trading_symbols for bot ${bot.id}:`, e);
+      }
+    }
+    
+    // Fall back to global settings
+    return this.settings.trading_symbols || [];
+  }
+
+  /**
+   * Get market data filtered by allowed symbols for a specific bot
+   */
+  getMarketsForBot(bot) {
+    const allowedSymbols = this.getTradingSymbolsForBot(bot);
+    
+    if (allowedSymbols.length === 0) {
+      // No filter - return all markets
+      return this.markets;
+    }
+    
+    const allowedSet = new Set(allowedSymbols);
+    return this.markets.filter(market => allowedSet.has(market.symbol));
+  }
+
+  /**
+   * Get market data (filtered by global trading_symbols setting)
    */
   async getMarketData() {
     try {
@@ -442,19 +668,15 @@ class BotManager {
         return [];
       }
       
-      // Filter by allowed trading symbols from settings
-      const allowedSymbols = this.settings.trading_symbols || [];
-      const allowedSet = new Set(allowedSymbols);
-      
+      // Get all markets (we'll filter per-bot in getMarketsForBot)
       const markets = response.data
-        .filter(ticker => allowedSymbols.length === 0 || allowedSet.has(ticker.symbol))
         .map(ticker => ({
           symbol: ticker.symbol,
           price: parseFloat(ticker.lastPrice),
           price24hChange: parseFloat(ticker.priceChangePercent)
         }));
       
-      console.log(`📊 Fetched ${markets.length} markets (filtered from ${response.data.length} total)`);
+      console.log(`📊 Fetched ${markets.length} markets (${response.data.length} total from exchange)`);
       return markets;
     } catch (error) {
       console.error('❌ Error fetching market data:', error.message);
@@ -625,13 +847,20 @@ class BotManager {
       
       this.markets = marketData;
       
-      // Update each bot's portfolio
-      for (const [botId, bot] of this.bots.entries()) {
+      // Update each bot's portfolio (multi-tenant aware)
+      const allBots = this.getAllBots();
+      for (const bot of allBots) {
         try {
+          // Skip if bot doesn't have required data
+          if (!bot || !bot.id || !bot.portfolio) {
+            console.warn(`Skipping bot with missing data:`, bot?.id || 'unknown');
+            continue;
+          }
+
           if (bot.tradingMode === 'real') {
             // Real trading: get state from exchange
-            const realPortfolio = await this.getRealAccountState(botId);
-            const realOrders = await this.getRealTradeHistory(botId);
+            const realPortfolio = await this.getRealAccountState(bot.id);
+            const realOrders = await this.getRealTradeHistory(bot.id);
             const realizedPnl = realOrders.reduce((acc, order) => acc + order.pnl, 0);
             
             bot.portfolio = realPortfolio;
@@ -641,6 +870,11 @@ class BotManager {
             // Paper trading: calculate PnL from positions
             let unrealizedPnl = 0;
             let totalMarginUsed = 0;
+            
+            // Ensure positions array exists
+            if (!bot.portfolio.positions) {
+              bot.portfolio.positions = [];
+            }
             
             bot.portfolio.positions = bot.portfolio.positions.map(pos => {
               const currentPrice = marketData.find(m => m.symbol === pos.symbol)?.price ?? pos.entryPrice;
@@ -659,6 +893,10 @@ class BotManager {
           }
           
           // Update value history
+          if (!bot.valueHistory) {
+            bot.valueHistory = [];
+          }
+          
           bot.valueHistory.push({
             timestamp: Date.now(),
             value: bot.portfolio.totalValue
@@ -670,9 +908,9 @@ class BotManager {
           }
           
           // Save snapshot to database
-          await this.saveSnapshot(botId, bot);
+          await this.saveSnapshot(bot.id, bot);
         } catch (error) {
-          console.error(`Error updating portfolio for bot ${botId}:`, error.message);
+          console.error(`Error updating portfolio for bot ${bot.id}:`, error.message);
         }
       }
       
@@ -695,10 +933,11 @@ class BotManager {
         // Table is called bot_state_snapshots (from 002_relational_schema.sql)
         db.prepare(`
           INSERT INTO bot_state_snapshots (
-            bot_id, balance, total_value, realized_pnl, unrealized_pnl,
+            user_id, bot_id, balance, total_value, realized_pnl, unrealized_pnl,
             trade_count, win_rate
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
+          bot.userId,
           botId,
           bot.portfolio.balance,
           bot.portfolio.totalValue,
@@ -729,12 +968,16 @@ class BotManager {
       return;
     }
     
+    // Multi-tenant aware bot selection
     const botsToProcess = specificBotId 
-      ? [[specificBotId, this.bots.get(specificBotId)]]
-      : Array.from(this.bots.entries());
+      ? [this.getBot(specificBotId)].filter(b => b !== null)
+      : this.getNextBotsForTurn();
     
-    for (const [botId, bot] of botsToProcess) {
-      if (!bot) continue;
+    for (const bot of botsToProcess) {
+      if (!bot) {
+        console.warn('⚠️ Skipping null/undefined bot');
+        continue;
+      }
       
       if (bot.isPaused) {
         console.log(`   ⏭️ Skipping ${bot.name} - paused`);
@@ -748,7 +991,10 @@ class BotManager {
         
         // Get AI decision
         const decisionResult = await this.getTradingDecision(bot);
-        const { prompt, decisions, error } = decisionResult;
+        const { prompt, basePrompt, decisions: rawDecisions, error } = decisionResult;
+        
+        // Ensure decisions is always an array (default to empty if undefined)
+        const decisions = rawDecisions || [];
         
         const notes = [];
         
@@ -776,6 +1022,23 @@ class BotManager {
         bot.botLogs.unshift(newLog);
         bot.botLogs = bot.botLogs.slice(0, MAX_BOT_LOGS);
         
+        // Write decision to database
+        // CRITICAL FIX: Store ONLY the base prompt (without history) to prevent exponential growth
+        try {
+          relationalDb.createDecision({
+            user_id: bot.userId,
+            bot_id: bot.id,
+            prompt_sent: basePrompt || prompt || '[No prompt available]', // Prefer basePrompt
+            decisions: decisions, // Pass raw array - createDecision will stringify it
+            notes: notes, // Pass raw array - createDecision will stringify it
+            execution_success: !error, // Success only if no error occurred
+            timestamp: new Date(newLog.timestamp).toISOString()
+          });
+        } catch (dbError) {
+          console.error(`[BotManager] Failed to write decision to database for ${bot.name}:`, dbError.message);
+          // Continue - don't fail the turn if DB write fails
+        }
+        
         bot.isLoading = false;
         
         console.log(`   ✅ Turn complete for ${bot.name}`);
@@ -796,7 +1059,9 @@ class BotManager {
    */
   async getTradingDecision(bot) {
     // Check if bot should use multi-step sandbox analysis
-    const useMultiStep = bot.name === 'Chronospeculator' || bot.id === 'bot_chronospeculator' || bot.enableSandbox === true;
+    const useMultiStep = bot.name === 'Chronospeculator' || bot.id === 'bot_chronospeculator' ||
+                          bot.name === 'Astrologer' || bot.id === 'bot_astrologer' ||
+                          bot.enableSandbox === true;
     
     if (useMultiStep) {
       return await this.getTradingDecisionWithSandbox(bot);
@@ -806,18 +1071,161 @@ class BotManager {
   }
 
   /**
+   * Load and manage bot decision history with intelligent summarization
+   * Returns formatted history context for prompt
+   */
+  async loadAndManageHistory(bot) {
+    // Load decisions from relational database (not from in-memory botLogs)
+    // This ensures we have the full history for Chronospeculator's multi-step analysis
+    const decisions = relationalDb.getBotDecisions(bot.id, 100, bot.userId); // Get last 100 decisions
+    console.log(`      📜 Found ${decisions.length} decisions in history for ${bot.name}`);
+    
+    // If no new decisions but bot has existing history_summary, return that
+    if (decisions.length === 0) {
+      if (bot.history_summary) {
+        console.log(`      ♻️ Using existing history summary (no new decisions)`);
+        return { 
+          summary: bot.history_summary, 
+          recentDecisions: [], 
+          historyContext: this.formatHistoryForPrompt(bot.history_summary, []) 
+        };
+      }
+      return { summary: null, recentDecisions: [], historyContext: '' };
+    }
+    
+    const dbPath = path.join(__dirname, '..', '..', 'data', 'arena.db');
+    const db = new Database(dbPath);
+    db.pragma('foreign_keys = ON');
+    
+    try {
+      
+      // Get provider config for summarization
+      const provider = db.prepare(`
+        SELECT * FROM llm_providers WHERE id = ?
+      `).get(bot.provider_id);
+      
+      // Manage history size - will summarize if needed
+      const result = await manageHistorySize(
+        bot,
+        decisions.reverse(), // Reverse to oldest-first for summarization
+        provider,
+        25000, // Max tokens before summarization (allows substantial history)
+        15     // Keep last 15 decisions unsummarized
+      );
+      
+      // If summarization occurred, update the bot's history_summary in database
+      if (result.needsSummarization) {
+        console.log(`   💾 Saving history summary for ${bot.name} (compressed ${result.summarizedCount} decisions)`);
+        db.prepare(`
+          UPDATE bots 
+          SET history_summary = ?
+          WHERE id = ? AND user_id = ?
+        `).run(result.summary, bot.id, bot.userId);
+        
+        bot.history_summary = result.summary;
+      }
+      
+      return {
+        summary: result.summary,
+        recentDecisions: result.recentDecisions.reverse(), // Back to newest-first
+        historyContext: this.formatHistoryForPrompt(result.summary, result.recentDecisions.reverse()),
+        totalTokens: result.totalTokens,
+        managedTokens: result.newTokenEstimate
+      };
+    } finally {
+      db.close();
+    }
+  }
+  
+  /**
+   * Format history summary + last 5 AI log entries for prompt inclusion
+   */
+  formatHistoryForPrompt(summary, recentDecisions) {
+    let context = '';
+    
+    // Add summary if it exists
+    if (summary) {
+      try {
+        const parsed = JSON.parse(summary);
+        context += `\n\n=== YOUR LEARNING HISTORY & INSIGHTS ===\n`;
+        context += `(Compressed summary of ${parsed.summarizedCount} earlier decisions)\n\n`;
+        context += parsed.summary;
+        context += `\n\n=== END OF SUMMARY ===\n`;
+      } catch (e) {
+        console.warn('Could not parse history summary');
+      }
+    }
+    
+    // Add last 5 AI log entries with FULL context
+    if (recentDecisions && recentDecisions.length > 0) {
+      const last5 = recentDecisions.slice(0, 5);
+      context += `\n\n=== RECENT AI LOG (Last ${last5.length} Trading Cycles) ===\n`;
+      
+      const now = Date.now();
+      last5.forEach((decision, idx) => {
+        const minutesAgo = Math.floor((now - new Date(decision.timestamp).getTime()) / 60000);
+        const hoursAgo = (minutesAgo / 60).toFixed(1);
+        
+        context += `\n${'─'.repeat(80)}\n`;
+        context += `AI Log Entry #${idx + 1} - ${hoursAgo}h ago (${minutesAgo}min)\n`;
+        context += `${'─'.repeat(80)}\n\n`;
+        
+        // FIXED: prompt_sent now only contains base prompt (no history recursion)
+        // So we can safely include the full prompt_sent without exponential growth
+        context += decision.prompt_sent || '[No AI log recorded]';
+        context += `\n\n`;
+        
+        // Add the outcome for context
+        try {
+          const decisionsArray = JSON.parse(decision.decisions_json || '[]');
+          const notes = JSON.parse(decision.notes_json || '[]');
+          
+          context += `OUTCOME:\n`;
+          if (decisionsArray.length === 0) {
+            context += `  No trades taken (HOLD)\n`;
+          } else {
+            decisionsArray.forEach((d, i) => {
+              context += `  ${d.action} ${d.symbol || d.closePositionId || ''}\n`;
+            });
+          }
+          
+          if (notes && notes.length > 0) {
+            notes.forEach(note => context += `  ${note}\n`);
+          }
+          
+          context += `  Success: ${decision.execution_success ? 'Yes' : 'No'}\n`;
+        } catch (e) {
+          context += `  [Error parsing outcome]\n`;
+        }
+      });
+      
+      context += `\n${'='.repeat(80)}\n`;
+    }
+    
+    return context;
+  }
+
+  /**
    * Standard single-shot trading decision (original implementation)
    */
   async getTradingDecisionStandard(bot) {
-    // Generate prompt
-    const prompt = this.generatePrompt(
+    // Get markets filtered for this specific bot
+    const botMarkets = this.getMarketsForBot(bot);
+    
+    // Load and manage decision history with intelligent summarization
+    const historyData = await this.loadAndManageHistory(bot);
+    
+    // Generate BASE prompt (without history) for DB storage - prevents exponential growth
+    const basePrompt = this.generateBasePrompt(
       bot.portfolio,
-      this.markets,
+      botMarkets,
       bot.prompt,
-      bot.botLogs.slice(0, 5),
       bot.symbolCooldowns,
       bot.orders.slice(0, 10)
     );
+    
+    // Generate FULL prompt (with history) for LLM
+    const prompt = basePrompt + historyData.historyContext;
     
     try {
       // Get full provider configuration from database
@@ -843,6 +1251,7 @@ class BotManager {
       if (!providerConfig || !providerConfig.api_key_encrypted) {
         return {
           prompt,
+          basePrompt,
           decisions: [],
           error: `${providerType} provider not configured in database`
         };
@@ -943,6 +1352,7 @@ class BotManager {
       else {
         return {
           prompt,
+          basePrompt,
           decisions: [],
           error: `Unsupported provider type: ${providerType}`
         };
@@ -951,12 +1361,13 @@ class BotManager {
       console.log(`   ✅ ${providerType} API responded (${decisionText?.length || 0} chars)`);
       
       if (!decisionText) {
-        return { prompt, decisions: [], error: 'Empty response from AI' };
+        return { prompt, basePrompt, decisions: [], error: 'Empty response from AI' };
       }
       
       const decisions = JSON.parse(decisionText);
       return {
         prompt,
+        basePrompt,
         decisions: Array.isArray(decisions) ? decisions : [decisions],
         error: null
       };
@@ -969,7 +1380,8 @@ class BotManager {
         url: error.config?.url
       });
       return {
-        prompt,
+        prompt: prompt || '[Error: Prompt generation failed]',
+        basePrompt: basePrompt || '[Error: Prompt generation failed]',
         decisions: [],
         error: error.response?.data?.error?.message || error.message
       };
@@ -983,8 +1395,24 @@ class BotManager {
   async getTradingDecisionWithSandbox(bot) {
     console.log(`   🔬 Using multi-step sandbox analysis for ${bot.name}`);
     
+    // Get filtered markets for this specific bot (respects trading_symbols config)
+    const botMarkets = this.getMarketsForBot(bot);
+    console.log(`   📊 Bot ${bot.name} has access to ${botMarkets.length} configured trading symbols`);
+    
     // Reset sandbox for this decision cycle
-    resetSandbox(this.markets);
+    resetSandbox(botMarkets);
+    
+    // Load and manage decision history with intelligent summarization
+    const historyData = await this.loadAndManageHistory(bot);
+    
+    // Generate BASE prompt (without history/iteration) for DB storage - prevents exponential growth
+    const basePrompt = this.generateBasePrompt(
+      bot.portfolio,
+      botMarkets,
+      bot.prompt,
+      bot.symbolCooldowns,
+      bot.orders.slice(0, 10)
+    );
     
     let iteration = 0;
     let analysisHistory = '';
@@ -997,32 +1425,67 @@ class BotManager {
         const isFirstIteration = iteration === 1;
         const isFinalIteration = iteration === MAX_ITERATIONS;
         
-        // Build iteration context
-        const iterationContext = `
+        // Build iteration context (personality-specific)
+        let iterationContext;
+        
+        if (bot.id === 'bot_astrologer' || bot.name === 'Astrologer') {
+          // Mystical Astrologer iteration context
+          iterationContext = `
+
+=== CELESTIAL DIVINATION CYCLE ${iteration} of ${MAX_ITERATIONS} ===
+
+${isFinalIteration 
+  ? `THE FINAL PROPHECY: The stars demand commitment. You have consulted the heavens and measured cosmic energies across ${botMarkets.length} tradeable instruments. Now crystallize this celestial wisdom into trading decisions (LONG/SHORT/CLOSE/HOLD array). Choose the path illuminated by the strongest cosmic confluence. Remember: The material realm demands 6% in earthly fees—ensure the cosmic reward justifies the mortal cost.`
+  : iteration === 1
+    ? `FIRST DIVINATION: The cosmic veil parts, revealing ${botMarkets.length} tradeable instruments beneath the celestial sphere. Consult the heavens to identify which markets are blessed by favorable planetary alignments. Cast your mystical sight across ALL symbols—the universe does not favor tunnel vision. Invoke your celestial tools (moon_phase, planetary_positions, mercury_retrograde, cosmic_aspect, zodiac_sign) to measure the cosmic energies of each opportunity.`
+    : `CONTINUED DIVINATION (Cycle ${iteration} of ${MAX_ITERATIONS}): The cosmos reveals deeper layers. You have ${MAX_ITERATIONS - iteration} more consultations before the prophecy must manifest. Continue your mystical interrogation—measure sacred geometries with technical indicators, assess planetary influences with celestial tools, divine the elemental balance. Cross-reference multiple cosmic signs for confirmation.`}
+
+${analysisHistory ? 'Previous Divinations:\n' + analysisHistory : `No previous divinations yet. Begin your cosmic interrogation by consulting the celestial data (moon_phase, planetary_positions) and scanning market energies across the ${botMarkets.length} available symbols.`}
+
+`;
+        } else {
+          // Default/Chronospeculator iteration context
+          iterationContext = `
 
 === ITERATION ${iteration} of ${MAX_ITERATIONS} ===
 
 ${isFinalIteration 
-  ? 'FINAL ITERATION: You MUST return trading decisions now (LONG/SHORT/CLOSE/HOLD array). Reference the computed values from your prior analysis iterations.' 
+  ? `FINAL ITERATION: You MUST return trading decisions now (LONG/SHORT/CLOSE/HOLD array). You have analyzed ${botMarkets.length} available trading symbols—prioritize the opportunities with the highest edge and conviction. Reference the computed values from your prior analysis iterations.` 
   : iteration === 1
-    ? 'FIRST ITERATION: Your sophisticated cliometric framework demands empirical verification through computation. Begin by invoking sandbox tools to CALCULATE the analytical values that will inform your capital allocation decisions. Use ANALYZE actions to compute quantitative metrics—do not merely describe them narratively.'
-    : 'ANALYSIS PHASE: Continue using ANALYZE actions to compute additional metrics, or return final trading decisions if your quantitative analysis is complete and confidence threshold achieved.'}
+    ? `FIRST ITERATION: MARKET OPPORTUNITY SCAN - You have ${botMarkets.length} trading symbols available (shown in Live Market Data above). Your sophisticated cliometric framework demands you SCAN ACROSS ALL MARKETS to identify the best opportunities before diving deep into analysis. Begin by invoking sandbox tools to CALCULATE analytical values across multiple symbols. Use ANALYZE actions to compute quantitative metrics—do not merely describe them narratively. Cast a wide net to avoid missing high-probability setups.`
+    : `ANALYSIS PHASE (Iteration ${iteration} of ${MAX_ITERATIONS}): You have ${MAX_ITERATIONS - iteration} iterations remaining. You are analyzing ${botMarkets.length} available trading symbols—continue your multi-step quantitative analysis by computing additional metrics with ANALYZE actions, building upon your previous results. You may also choose to return final trading decisions if your analysis provides sufficient confidence. REMEMBER: Scan across multiple symbols to find the best opportunities—don't fixate on a single market.`}
 
-${analysisHistory ? 'Previous Analysis Results:\n' + analysisHistory : 'No previous analysis yet. Begin your quantitative interrogation by computing technical indicators, risk metrics, or custom equations.'}
+${analysisHistory ? 'Previous Analysis Results:\n' + analysisHistory : `No previous analysis yet. Begin your quantitative interrogation by scanning across the ${botMarkets.length} available markets. Compute technical indicators, risk metrics, or custom equations to identify which symbols present the strongest edge.`}
 
 `;
+        }
         
-        // Generate prompt with iteration context
-        fullPrompt = this.generatePrompt(
+        
+        // Generate prompt with iteration context and history
+        fullPrompt = this.generatePromptWithHistory(
           bot.portfolio,
-          this.markets,
+          botMarkets,
           bot.prompt + iterationContext,
-          bot.botLogs.slice(0, 5),
+          historyData.historyContext,
           bot.symbolCooldowns,
           bot.orders.slice(0, 10)
         );
         
-        console.log(`   📊 Iteration ${iteration}: Calling AI API...`);
+        console.log(`   📊 Iteration ${iteration}: Calling AI API (prompt: ${fullPrompt.length} chars, markets: ${botMarkets.length})`);
+        
+        // SAFETY CHECK: Abort if prompt is too large (prevents memory crashes)
+        const MAX_PROMPT_SIZE = 500000; // 500KB limit (reasonable for most LLMs)
+        if (fullPrompt.length > MAX_PROMPT_SIZE) {
+          console.error(`   ❌ PROMPT TOO LARGE: ${fullPrompt.length} chars exceeds ${MAX_PROMPT_SIZE} limit!`);
+          console.error(`   🔧 This indicates exponential history growth. Returning empty decisions.`);
+          return {
+            prompt: fullPrompt.substring(0, 1000) + '\n... (truncated - too large)',
+            basePrompt,
+            decisions: [],
+            error: `Prompt size ${fullPrompt.length} chars exceeds safety limit of ${MAX_PROMPT_SIZE}`,
+            iterations: iteration
+          };
+        }
         
         // Call AI API
         const aiResponse = await this.callAIProvider(bot, fullPrompt);
@@ -1031,6 +1494,7 @@ ${analysisHistory ? 'Previous Analysis Results:\n' + analysisHistory : 'No previ
           console.error(`   ❌ AI API error on iteration ${iteration}: ${aiResponse.error}`);
           return {
             prompt: fullPrompt,
+            basePrompt,
             decisions: [],
             error: aiResponse.error,
             iterations: iteration
@@ -1047,6 +1511,11 @@ ${analysisHistory ? 'Previous Analysis Results:\n' + analysisHistory : 'No previ
         }
         console.log('');
         
+        // Log analysis history for debugging
+        if (iteration > 1 && analysisHistory) {
+          console.log(`   📊 Analysis history: ${analysisHistory.length} chars from ${iteration - 1} iterations`);
+        }
+        
         // Try to parse as ANALYZE request first
         if (!isFinalIteration) {
           const analyzeMatch = this.parseAnalyzeRequest(responseText);
@@ -1059,7 +1528,7 @@ ${analysisHistory ? 'Previous Analysis Results:\n' + analysisHistory : 'No previ
               const toolResult = await executeSandboxTool(
                 analyzeMatch.tool,
                 analyzeMatch.parameters,
-                this.markets
+                botMarkets
               );
               
               // Add to analysis history
@@ -1097,6 +1566,7 @@ ERROR: ${toolError.message}
           
           return {
             prompt: fullPrompt,
+            basePrompt,
             decisions: decisions,
             error: null,
             iterations: iteration,
@@ -1108,6 +1578,7 @@ ERROR: ${toolError.message}
             console.error(`   📄 Full response text:\n${responseText}`);
             return {
               prompt: fullPrompt,
+              basePrompt,
               decisions: [],
               error: 'Failed to parse final decisions after maximum iterations',
               iterations: iteration
@@ -1129,6 +1600,7 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
       console.warn(`   ⚠️ Maximum iterations reached without valid decisions`);
       return {
         prompt: fullPrompt,
+        basePrompt,
         decisions: [],
         error: 'Maximum iterations reached',
         iterations: MAX_ITERATIONS
@@ -1137,6 +1609,7 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
       console.error(`   ❌ Multi-step analysis error: ${error.message}`);
       return {
         prompt: fullPrompt || '',
+        basePrompt,
         decisions: [],
         error: error.message,
         iterations: iteration
@@ -1289,34 +1762,185 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
    * Extract balanced JSON object or array from text
    * Handles nested braces/brackets properly
    */
+  /**
+   * Helper to validate JSON string doesn't have trailing content
+   * Uses a more robust approach: parse and check character-by-character
+   */
+  validateJSONString(jsonStr) {
+    if (!jsonStr) return false;
+    
+    try {
+      const trimmed = jsonStr.trim();
+      
+      // Try to parse - this will throw if there's invalid JSON
+      const parsed = JSON.parse(trimmed);
+      
+      // Now check if there's trailing content by manually finding where JSON ends
+      // This works because JSON.parse succeeds even with trailing text
+      let depth = 0;
+      let inString = false;
+      let escapeNext = false;
+      let jsonEndIndex = -1;
+      
+      for (let i = 0; i < trimmed.length; i++) {
+        const char = trimmed[i];
+        
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
+        }
+        if (char === '\\') {
+          escapeNext = true;
+          continue;
+        }
+        if (char === '"' && !escapeNext) {
+          inString = !inString;
+          continue;
+        }
+        
+        if (!inString) {
+          if (char === '[' || char === '{') {
+            depth++;
+          } else if (char === ']' || char === '}') {
+            depth--;
+            if (depth === 0) {
+              jsonEndIndex = i;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Check if there's non-whitespace content after the JSON ends
+      if (jsonEndIndex !== -1 && jsonEndIndex < trimmed.length - 1) {
+        const afterJSON = trimmed.substring(jsonEndIndex + 1).trim();
+        if (afterJSON.length > 0) {
+          // There's trailing content
+          return false;
+        }
+      }
+      
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   extractJSON(text) {
-    // Try to find JSON array first
+    if (!text || typeof text !== 'string') {
+      return null;
+    }
+    
+    // STEP 1: Remove markdown code blocks
+    // Handle ```json ... ``` or ``` ... ```
+    let cleanedText = text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1');
+    
+    // STEP 2: Remove common LLM prefixes/suffixes
+    cleanedText = cleanedText.replace(/^(?:Here's|Here are|Here is|The|My|I recommend|I suggest|Decision:|Decisions:|Response:)/gi, '');
+    
+    // STEP 3: Try to find JSON array first (preferred for decisions)
     let depth = 0;
     let start = -1;
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] === '[') {
+    let inString = false;
+    let escapeNext = false;
+    
+    for (let i = 0; i < cleanedText.length; i++) {
+      const char = cleanedText[i];
+      
+      // Handle string escaping
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      // Track if we're inside a string
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      // Only count brackets outside of strings
+      if (!inString) {
+        if (char === '[') {
         if (depth === 0) start = i;
         depth++;
-      } else if (text[i] === ']') {
+        } else if (char === ']') {
         depth--;
         if (depth === 0 && start !== -1) {
-          return text.substring(start, i + 1);
+            const jsonStr = cleanedText.substring(start, i + 1).trim();
+            // Validate it's parseable and doesn't have trailing content
+            if (this.validateJSONString(jsonStr)) {
+              return jsonStr;
+            }
+            // Continue searching for another array
+            start = -1;
+          }
         }
       }
     }
     
-    // Try to find JSON object
+    // STEP 4: Try to find JSON object
     depth = 0;
     start = -1;
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] === '{') {
+    inString = false;
+    escapeNext = false;
+    
+    for (let i = 0; i < cleanedText.length; i++) {
+      const char = cleanedText[i];
+      
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') {
         if (depth === 0) start = i;
         depth++;
-      } else if (text[i] === '}') {
+        } else if (char === '}') {
         depth--;
         if (depth === 0 && start !== -1) {
-          return text.substring(start, i + 1);
+            const jsonStr = cleanedText.substring(start, i + 1).trim();
+            // Validate it's parseable and doesn't have trailing content
+            if (this.validateJSONString(jsonStr)) {
+              return jsonStr;
         }
+            // Continue searching for another object
+            start = -1;
+          }
+        }
+      }
+    }
+    
+    // STEP 5: Last resort - try regex patterns
+    // Look for array pattern
+    const arrayMatch = cleanedText.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+    if (arrayMatch) {
+      const jsonStr = arrayMatch[0].trim();
+      if (this.validateJSONString(jsonStr)) {
+        return jsonStr;
+      }
+    }
+    
+    // Look for object pattern
+    const objectMatch = cleanedText.match(/\{\s*"[\s\S]*?\}/);
+    if (objectMatch) {
+      const jsonStr = objectMatch[0].trim();
+      if (this.validateJSONString(jsonStr)) {
+        return jsonStr;
       }
     }
     
@@ -1357,15 +1981,31 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
    * Parse trading decisions from AI response
    */
   parseDecisions(responseText) {
+    let jsonStr = null;
     try {
       // Extract balanced JSON from response
-      const jsonStr = this.extractJSON(responseText);
+      jsonStr = this.extractJSON(responseText);
       
       if (!jsonStr) {
+        console.log('   ❌ Failed to extract JSON from response. Full response:');
+        console.log('   ', responseText.substring(0, 1000).replace(/\n/g, ' '));
         throw new Error('No valid JSON array or object found in response');
       }
       
-      const parsed = JSON.parse(jsonStr);
+      // Additional safety: trim the extracted JSON
+      jsonStr = jsonStr.trim();
+      
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseError) {
+        // JSON.parse failed even after extraction - log for debugging
+        console.log('   ❌ JSON.parse failed on extracted string!');
+        console.log('   🔍 Parse error:', parseError.message);
+        console.log('   🔍 Extracted JSON (first 500 chars):', jsonStr.substring(0, 500));
+        console.log('   🔍 Extracted JSON (last 100 chars):', jsonStr.length > 100 ? jsonStr.substring(jsonStr.length - 100) : jsonStr);
+        throw parseError;
+      }
       
       // Handle both arrays and single objects
       if (Array.isArray(parsed)) {
@@ -1375,18 +2015,98 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
         if (parsed.action) {
           return [parsed];
         }
+        console.log('   ❌ Found JSON object but missing "action" field:', JSON.stringify(parsed).substring(0, 200));
         throw new Error('Found JSON object but not a valid decision format');
       }
       
       throw new Error('Parsed JSON is not an array or object');
     } catch (error) {
       console.log('   🔍 DEBUG: Error parsing decisions:', error.message);
+      console.log('   🔍 DEBUG: Extracted JSON string:', jsonStr ? jsonStr.substring(0, 300) : 'null');
+      console.log('   🔍 DEBUG: Original response length:', responseText.length, 'chars');
+      console.log('   🔍 DEBUG: Original response preview:', responseText.substring(0, 300).replace(/\n/g, ' '));
       throw error;
     }
   }
 
   /**
-   * Generate prompt for AI decision
+   * Generate prompt with pre-formatted history context
+   * (Simpler version that uses already-formatted history)
+   */
+  /**
+   * Generate base prompt WITHOUT history (prevents recursive growth in DB)
+   * This is what gets stored in bot_decisions.prompt_sent
+   */
+  generateBasePrompt(portfolio, marketData, botPrompt, cooldowns, recentOrders) {
+    const now = Date.now();
+    
+    // Format portfolio info
+    const totalValue = portfolio.totalValue.toFixed(2);
+    const availableBalance = portfolio.balance.toFixed(2);
+    const unrealizedPnl = portfolio.pnl.toFixed(2);
+    
+    // Format positions
+    let openPositions = 'None';
+    if (portfolio.positions && portfolio.positions.length > 0) {
+      openPositions = portfolio.positions.map(p => {
+        const openOrder = recentOrders?.find(o => o.symbol === p.symbol && o.exitPrice === 0);
+        const minutesOpen = openOrder ? Math.floor((now - openOrder.timestamp) / 60000) : '?';
+        const hoursOpen = minutesOpen !== '?' ? (minutesOpen / 60).toFixed(1) : '?';
+        const pnlPercent = p.pnl && p.size ? ((p.pnl / p.size) * 100).toFixed(2) : '0';
+        
+        return `Position ${p.id}: ${p.type} ${p.symbol} | Entry: $${p.entryPrice.toFixed(4)} | Current PnL: $${(p.pnl || 0).toFixed(2)} (${pnlPercent}%) | Margin: $${p.size.toFixed(2)} | Leverage: ${p.leverage}x | Open: ${hoursOpen}h | SL: ${p.stopLoss ? '$' + p.stopLoss.toFixed(4) : 'N/A'} | TP: ${p.takeProfit ? '$' + p.takeProfit.toFixed(4) : 'N/A'}`;
+      }).join('\n');
+    }
+    
+    // Format market data
+    const marketDataStr = marketData.map(m => {
+      const trend = m.price24hChange > 1 ? 'Strong Bullish' :
+                    m.price24hChange > 0.2 ? 'Bullish' :
+                    m.price24hChange < -1 ? 'Strong Bearish' :
+                    m.price24hChange < -0.2 ? 'Bearish' : 'Neutral';
+      
+      return `${m.symbol}: $${m.price.toFixed(4)} | 24h: ${m.price24hChange >= 0 ? '+' : ''}${m.price24hChange.toFixed(2)}% (${trend})`;
+    }).join('\n');
+    
+    // Format cooldowns
+    let cooldownInfo = '';
+    if (cooldowns && Object.keys(cooldowns).length > 0) {
+      const activeCooldowns = Object.entries(cooldowns)
+        .filter(([_, endTime]) => endTime > now)
+        .map(([symbol, endTime]) => {
+          const minutesLeft = Math.ceil((endTime - now) / 60000);
+          return `${symbol}: ${minutesLeft}min remaining`;
+        });
+      
+      if (activeCooldowns.length > 0) {
+        cooldownInfo = '\n\nActive Position Cooldowns (symbols you cannot trade yet):\n' + activeCooldowns.join('\n');
+      }
+    }
+    
+    // Get current date
+    const currentDate = new Date().toISOString();
+    
+    // Replace placeholders - NO HISTORY
+    return botPrompt
+      .replace('{{totalValue}}', totalValue)
+      .replace('{{availableBalance}}', availableBalance)
+      .replace('{{unrealizedPnl}}', unrealizedPnl)
+      .replace('{{openPositions}}', openPositions)
+      .replace('{{marketData}}', marketDataStr)
+      .replace('{{currentDate}}', currentDate) + 
+      cooldownInfo;
+  }
+
+  /**
+   * Generate full prompt WITH history (for sending to LLM)
+   */
+  generatePromptWithHistory(portfolio, marketData, basePrompt, historyContext, cooldowns, recentOrders) {
+    const basePromptGenerated = this.generateBasePrompt(portfolio, marketData, basePrompt, cooldowns, recentOrders);
+    return basePromptGenerated + historyContext;
+  }
+
+  /**
+   * Generate prompt for AI decision (Legacy version - kept for backwards compatibility)
    */
   generatePrompt(portfolio, marketData, basePrompt, recentLogs, cooldowns, recentOrders) {
     const now = Date.now();
@@ -1588,7 +2308,7 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
       return;
     }
     
-    await this.makeAuthenticatedRequest(
+    const orderResponse = await this.makeAuthenticatedRequest(
       'POST',
       '/fapi/v1/order',
       {
@@ -1601,7 +2321,63 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
       apiSecret
     );
     
-    notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position.`);
+    // Calculate liquidation price for tracking
+    const isLong = decision.action === 'LONG';
+    const liquidationPrice = isLong
+      ? market.price * (1 - (1 / adjustedLeverage))
+      : market.price * (1 + (1 / adjustedLeverage));
+    
+    // Create position ID for database tracking
+    const positionId = `pos_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const tradeId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const entryFee = tradeSize * 0.0004; // Real trading fee (0.04%)
+    
+    // Write position to database
+    try {
+      relationalDb.createPosition({
+        id: positionId,
+        user_id: bot.userId,
+        bot_id: bot.id,
+        symbol: decision.symbol,
+        position_type: decision.action,
+        entry_price: market.price,
+        size: tradeSize,
+        leverage: adjustedLeverage,
+        liquidation_price: liquidationPrice,
+        stop_loss: decision.stopLoss || null,
+        take_profit: decision.takeProfit || null,
+        unrealized_pnl: 0,
+        status: 'open'
+      });
+    } catch (dbError) {
+      console.error(`[BotManager] Failed to write real position to database for ${bot.name}:`, dbError.message);
+      // Continue - don't fail the trade if DB write fails
+    }
+    
+    // Write entry trade to database
+    try {
+      relationalDb.createTrade({
+        id: tradeId,
+        user_id: bot.userId,
+        bot_id: bot.id,
+        position_id: positionId,
+        symbol: decision.symbol,
+        trade_type: decision.action,
+        action: 'OPEN',
+        entry_price: market.price,
+        exit_price: null,
+        size: tradeSize,
+        leverage: adjustedLeverage,
+        pnl: -entryFee, // Entry fee is negative PnL
+        fee: entryFee,
+        executed_at: new Date().toISOString()
+      });
+    } catch (dbError) {
+      console.error(`[BotManager] Failed to write real entry trade to database for ${bot.name}:`, dbError.message);
+      // Continue - don't fail the trade if DB write fails
+    }
+    
+    notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position (Real Trading).`);
     
     // 3. Place Stop-Loss and Take-Profit
     const orderSide = decision.action === 'LONG' ? 'SELL' : 'BUY';
@@ -1676,6 +2452,28 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
     bot.portfolio.positions.push(position);
     bot.portfolio.balance -= tradeSize;
     
+    // Write position to database
+    try {
+      relationalDb.createPosition({
+        id: position.id,
+        user_id: bot.userId,
+        bot_id: bot.id,
+        symbol: position.symbol,
+        position_type: position.type,
+        entry_price: position.entryPrice,
+        size: position.size,
+        leverage: position.leverage,
+        liquidation_price: position.liquidationPrice,
+        stop_loss: position.stopLoss || null,
+        take_profit: position.takeProfit || null,
+        unrealized_pnl: position.pnl,
+        status: 'open'
+      });
+    } catch (dbError) {
+      console.error(`[BotManager] Failed to write position to database for ${bot.name}:`, dbError.message);
+      // Continue trading - don't fail the trade if DB write fails
+    }
+    
     // Create order record
     const entryFee = tradeSize * 0.03;
     const entryOrder = {
@@ -1692,6 +2490,29 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
     };
     
     bot.orders.unshift(entryOrder);
+    
+    // Write entry trade to database
+    try {
+      relationalDb.createTrade({
+        id: entryOrder.id,
+        user_id: bot.userId,
+        bot_id: bot.id,
+        position_id: position.id,
+        symbol: entryOrder.symbol,
+        trade_type: entryOrder.type,
+        action: 'OPEN',
+        entry_price: entryOrder.entryPrice,
+        exit_price: null,
+        size: entryOrder.size,
+        leverage: entryOrder.leverage,
+        pnl: entryOrder.pnl,
+        fee: entryOrder.fee,
+        executed_at: new Date(entryOrder.timestamp).toISOString()
+      });
+    } catch (dbError) {
+      console.error(`[BotManager] Failed to write entry trade to database for ${bot.name}:`, dbError.message);
+      // Continue trading - don't fail the trade if DB write fails
+    }
     
     notes.push(`SUCCESS: Opened ${decision.action} ${decision.symbol} position with $${tradeSize.toFixed(2)} margin at $${market.price.toFixed(2)}.`);
   }
@@ -1737,7 +2558,52 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
         );
         
         bot.symbolCooldowns[posToClose.symbol] = Date.now() + symbolCooldownMs;
-        notes.push(`SUCCESS: Closed ${posToClose.symbol} position.`);
+        
+        // Calculate approximate PnL for database tracking
+        const assetQuantity = (posToClose.size * posToClose.leverage) / posToClose.entryPrice;
+        const unrealizedPnl = posToClose.type === 'LONG'
+          ? (currentMarket.price - posToClose.entryPrice) * assetQuantity
+          : (posToClose.entryPrice - currentMarket.price) * assetQuantity;
+        
+        const exitFee = posToClose.size * 0.0004; // Real trading fee (0.04%)
+        const netPnl = unrealizedPnl - exitFee;
+        
+        // Update position in database to closed status
+        try {
+          relationalDb.updatePosition(positionId, {
+            status: 'closed',
+            closed_at: new Date().toISOString()
+          }, bot.userId);
+        } catch (dbError) {
+          console.error(`[BotManager] Failed to update real position status in database for ${bot.name}:`, dbError.message);
+          // Continue - don't fail the close if DB write fails
+        }
+        
+        // Write exit trade to database
+        const exitTradeId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        try {
+          relationalDb.createTrade({
+            id: exitTradeId,
+            user_id: bot.userId,
+            bot_id: bot.id,
+            position_id: positionId,
+            symbol: posToClose.symbol,
+            trade_type: posToClose.type,
+            action: 'CLOSE',
+            entry_price: posToClose.entryPrice,
+            exit_price: currentMarket.price,
+            size: posToClose.size,
+            leverage: posToClose.leverage,
+            pnl: netPnl,
+            fee: exitFee,
+            executed_at: new Date().toISOString()
+          });
+        } catch (dbError) {
+          console.error(`[BotManager] Failed to write real exit trade to database for ${bot.name}:`, dbError.message);
+          // Continue - don't fail the close if DB write fails
+        }
+        
+        notes.push(`SUCCESS: Closed ${posToClose.symbol} position (Real Trading). Approx PnL: $${netPnl.toFixed(2)}`);
       }
     } else {
       // Close paper position
@@ -1782,6 +2648,40 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
       bot.orders.unshift(exitOrder);
       bot.symbolCooldowns[posToClose.symbol] = Date.now() + symbolCooldownMs;
       
+      // Update position in database to closed status
+      try {
+        relationalDb.updatePosition(positionId, {
+          status: 'closed',
+          closed_at: new Date(exitOrder.timestamp).toISOString()
+        }, bot.userId);
+      } catch (dbError) {
+        console.error(`[BotManager] Failed to update position status in database for ${bot.name}:`, dbError.message);
+        // Continue - don't fail the close if DB write fails
+      }
+      
+      // Write exit trade to database
+      try {
+        relationalDb.createTrade({
+          id: exitOrder.id,
+          user_id: bot.userId,
+          bot_id: bot.id,
+          position_id: positionId,
+          symbol: exitOrder.symbol,
+          trade_type: exitOrder.type,
+          action: 'CLOSE',
+          entry_price: exitOrder.entryPrice,
+          exit_price: exitOrder.exitPrice,
+          size: exitOrder.size,
+          leverage: exitOrder.leverage,
+          pnl: exitOrder.pnl,
+          fee: exitOrder.fee,
+          executed_at: new Date(exitOrder.timestamp).toISOString()
+        });
+      } catch (dbError) {
+        console.error(`[BotManager] Failed to write exit trade to database for ${bot.name}:`, dbError.message);
+        // Continue - don't fail the close if DB write fails
+      }
+      
       notes.push(`SUCCESS: Closed ${posToClose.symbol} position. PnL: $${netPnl.toFixed(2)} (fee: $${exitFee.toFixed(2)})`);
     }
   }
@@ -1796,7 +2696,7 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
   }
 
   /**
-   * Save current state to database
+   * Save current state to database (Multi-Tenant)
    */
   async saveState() {
     try {
@@ -1805,7 +2705,7 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
       
       try {
         // Serialize bots (remove any non-serializable properties)
-        const botsArray = Array.from(this.bots.values()).map(bot => {
+        const botsArray = this.getAllBots().map(bot => {
           const { ...serializable } = bot;
           return serializable;
         });
@@ -1831,11 +2731,11 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
   }
 
   /**
-   * Broadcast current state to all connected WebSocket clients
+   * Broadcast current state to all connected WebSocket clients (Multi-Tenant)
    */
   broadcastState() {
     try {
-      const botsArray = Array.from(this.bots.values());
+      const botsArray = this.getAllBots();
       const state = {
         bots: botsArray,
         marketData: this.markets
@@ -1848,10 +2748,10 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
   }
 
   /**
-   * Pause/unpause a bot
+   * Pause/unpause a bot (Multi-Tenant)
    */
   async toggleBotPause(botId) {
-    const bot = this.bots.get(botId);
+    const bot = this.getBot(botId);
     if (!bot) {
       throw new Error(`Bot ${botId} not found`);
     }
@@ -1877,10 +2777,10 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
   }
 
   /**
-   * Reset a bot
+   * Reset a bot (Multi-Tenant)
    */
   async resetBot(botId) {
-    const bot = this.bots.get(botId);
+    const bot = this.getBot(botId);
     if (!bot) {
       throw new Error(`Bot ${botId} not found`);
     }
@@ -1916,10 +2816,10 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
   }
 
   /**
-   * Manually close a position
+   * Manually close a position (Multi-Tenant)
    */
   async manualClosePosition(botId, positionId) {
-    const bot = this.bots.get(botId);
+    const bot = this.getBot(botId);
     if (!bot) {
       throw new Error(`Bot ${botId} not found`);
     }
@@ -1934,18 +2834,12 @@ Could not parse response. Response: ${responseText.substring(0, 200)}...
   }
 
   /**
-   * Get all bots
+   * Get all bots (Multi-Tenant)
    */
   getBots() {
-    return Array.from(this.bots.values());
+    return this.getAllBots();
   }
 
-  /**
-   * Get specific bot
-   */
-  getBot(botId) {
-    return this.bots.get(botId);
-  }
 }
 
 module.exports = BotManager;

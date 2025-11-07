@@ -13,6 +13,9 @@ const config = require('./config');
 const { getArenaState, updateArenaState, initializeArenaState } = require('./database');
 const WebSocketServer = require('./websocket');
 const BotManager = require('./services/BotManager');
+const leaderboardScheduler = require('./services/leaderboardScheduler');
+const snapshotCleanupScheduler = require('./services/snapshotCleanupScheduler');
+const backup = require('./scripts/backup');
 
 // Validate configuration before starting
 if (!config.validateConfig()) {
@@ -56,6 +59,14 @@ function createHmacSha256Signature(data, secret) {
 // Authentication routes (no /v2 prefix)
 const authRoutes = require('./routes/auth');
 app.use('/api/auth', authRoutes);
+
+// Leaderboard routes (no /v2 prefix for direct access)
+const leaderboardRoutes = require('./routes/leaderboard');
+app.use('/api/leaderboard', leaderboardRoutes);
+
+// Admin routes (no /v2 prefix for direct access)
+const adminRoutes = require('./routes/admin');
+app.use('/api/admin', adminRoutes);
 
 /**
  * POST /api/gemini - Forward requests to Google Gemini API
@@ -455,12 +466,36 @@ app.listen(config.port, async () => {
     console.error('❌ Failed to start BotManager:', error);
     console.error('   Trading will not function. Please check your configuration.\n');
   }
+
+  // Start leaderboard scheduler
+  try {
+    leaderboardScheduler.start();
+  } catch (error) {
+    console.error('❌ Failed to start leaderboard scheduler:', error);
+  }
+
+  // Start snapshot cleanup scheduler
+  try {
+    snapshotCleanupScheduler.start();
+  } catch (error) {
+    console.error('❌ Failed to start snapshot cleanup scheduler:', error);
+  }
+
+  // Start backup scheduler
+  try {
+    backup.start();
+  } catch (error) {
+    console.error('❌ Failed to start backup scheduler:', error);
+  }
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received: closing servers');
   botManager.stop();
+  leaderboardScheduler.stop();
+  snapshotCleanupScheduler.stop();
+  backup.stop();
   wsServer.close();
   process.exit(0);
 });
@@ -468,6 +503,9 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('SIGINT signal received: closing servers');
   botManager.stop();
+  leaderboardScheduler.stop();
+  snapshotCleanupScheduler.stop();
+  backup.stop();
   wsServer.close();
   process.exit(0);
 });

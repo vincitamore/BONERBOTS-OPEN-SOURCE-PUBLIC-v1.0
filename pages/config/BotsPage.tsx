@@ -6,10 +6,12 @@
 
 import React, { useState } from 'react';
 import { useConfiguration } from '../../context/ConfigurationContext';
+import { useToast } from '../../context/ToastContext';
 import { useNavigate } from 'react-router-dom';
 
 export const BotsPage: React.FC = () => {
   const { bots, loading, pauseBot, deleteBot, resetBot } = useConfiguration();
+  const { showToast, confirm } = useToast();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -19,44 +21,53 @@ export const BotsPage: React.FC = () => {
       await pauseBot(botId, !currentlyPaused);
     } catch (error) {
       console.error('Failed to pause/unpause bot:', error);
-      alert('Failed to pause/unpause bot. Please try again.');
+      showToast('Failed to pause/unpause bot. Please try again.', 'error');
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleReset = async (botId: string, botName: string) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to reset "${botName}"? This will close all positions and reset the balance to the initial amount. This action cannot be undone.`
-    );
+    const confirmed = await confirm({
+      title: 'Reset Bot',
+      message: `Are you sure you want to reset "${botName}"? This will close all positions and reset the balance to the initial amount. This action cannot be undone.`,
+      confirmText: 'Reset',
+      cancelText: 'Cancel',
+      type: 'warning',
+    });
     
     if (!confirmed) return;
 
     try {
       setActionLoading(botId);
       await resetBot(botId);
-      alert(`Bot "${botName}" has been reset successfully.`);
+      showToast(`Bot "${botName}" has been reset successfully.`, 'success');
     } catch (error) {
       console.error('Failed to reset bot:', error);
-      alert('Failed to reset bot. Please try again.');
+      showToast('Failed to reset bot. Please try again.', 'error');
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleDelete = async (botId: string, botName: string) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${botName}"? This action cannot be undone.`
-    );
+    const confirmed = await confirm({
+      title: 'Delete Bot',
+      message: `Are you sure you want to delete "${botName}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger',
+    });
     
     if (!confirmed) return;
 
     try {
       setActionLoading(botId);
       await deleteBot(botId);
+      showToast(`Bot "${botName}" deleted successfully.`, 'success');
     } catch (error) {
       console.error('Failed to delete bot:', error);
-      alert('Failed to delete bot. Please try again.');
+      showToast('Failed to delete bot. Please try again.', 'error');
     } finally {
       setActionLoading(null);
     }

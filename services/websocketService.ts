@@ -18,9 +18,9 @@ class WebSocketService {
   private heartbeatInterval: number | null = null;
 
   /**
-   * Connect to the WebSocket server
+   * Connect to the WebSocket server with JWT authentication
    */
-  connect(url: string = WS_URL): void {
+  connect(url: string = WS_URL, token?: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       console.log('WebSocket already connected');
       return;
@@ -29,8 +29,19 @@ class WebSocketService {
     this.isIntentionalClose = false;
 
     try {
-      console.log(`Connecting to WebSocket at ${url}`);
-      this.ws = new WebSocket(url);
+      // Get token from parameter or localStorage
+      const authToken = token || localStorage.getItem('auth_token');
+      
+      if (!authToken) {
+        console.error('Cannot connect to WebSocket: No authentication token available');
+        return;
+      }
+
+      // Append token as query parameter
+      const wsUrl = `${url}?token=${encodeURIComponent(authToken)}`;
+      
+      console.log(`Connecting to WebSocket at ${url} (authenticated)`);
+      this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         console.log('WebSocket connected successfully');
@@ -146,6 +157,13 @@ class WebSocketService {
    * Handle reconnection with exponential backoff
    */
   private handleReconnect(): void {
+    // Check if token is still available before attempting reconnect
+    const authToken = localStorage.getItem('auth_token');
+    if (!authToken) {
+      console.log('No auth token available, skipping reconnect');
+      return;
+    }
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached. Giving up.');
       this.notifyListeners('connection', { status: 'failed' });

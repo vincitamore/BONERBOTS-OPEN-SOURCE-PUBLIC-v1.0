@@ -9,32 +9,54 @@ const crypto = require('crypto');
  * Encryption Utility for API Keys and Secrets
  * 
  * Uses AES-256-GCM for encryption with authentication tags
+ * Supports per-user encryption keys derived from master key + user ID
  */
 
 const ALGORITHM = 'aes-256-gcm';
 
-// Get encryption key from environment or generate a default one (not recommended for production)
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY 
-  ? crypto.scryptSync(process.env.ENCRYPTION_KEY, 'salt', 32)
-  : crypto.scryptSync('default-key-change-this-in-production', 'salt', 32);
+// Get master encryption key from environment or generate a default one (not recommended for production)
+const MASTER_ENCRYPTION_KEY = process.env.MASTER_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY
+  ? process.env.MASTER_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY
+  : 'default-key-change-this-in-production';
 
-if (!process.env.ENCRYPTION_KEY) {
-  console.warn('⚠️  WARNING: No ENCRYPTION_KEY set in environment. Using default key (not secure!)');
-  console.warn('   Please set ENCRYPTION_KEY in server/.env to a random 32+ character string');
+if (!process.env.MASTER_ENCRYPTION_KEY && !process.env.ENCRYPTION_KEY) {
+  console.warn('⚠️  WARNING: No MASTER_ENCRYPTION_KEY set in environment. Using default key (not secure!)');
+  console.warn('   Please set MASTER_ENCRYPTION_KEY in server/.env to a random 32+ character string');
 }
 
 /**
- * Encrypt a plaintext string
+ * Derive a user-specific encryption key from master key + user ID
+ * This ensures that data encrypted for one user cannot be decrypted with another user's key
+ * @param {string} userId - The user ID to derive the key for
+ * @returns {Buffer} - The derived encryption key
+ */
+function deriveUserKey(userId) {
+  if (!userId) {
+    throw new Error('User ID is required for key derivation');
+  }
+  
+  // Use userId as salt for key derivation
+  return crypto.scryptSync(MASTER_ENCRYPTION_KEY, userId, 32);
+}
+
+/**
+ * Encrypt a plaintext string with optional user-specific key
  * @param {string} text - The text to encrypt
+ * @param {string} [userId] - Optional user ID for per-user encryption
  * @returns {string} - JSON string containing iv, authTag, and encrypted data
  */
-function encrypt(text) {
+function encrypt(text, userId = null) {
   if (!text) {
     throw new Error('Text to encrypt cannot be empty');
   }
   
+  // Use user-specific key if userId provided, otherwise use master key
+  const encryptionKey = userId 
+    ? deriveUserKey(userId)
+    : crypto.scryptSync(MASTER_ENCRYPTION_KEY, 'salt', 32);
+  
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, encryptionKey, iv);
   
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
@@ -50,11 +72,12 @@ function encrypt(text) {
 }
 
 /**
- * Decrypt an encrypted string
+ * Decrypt an encrypted string with optional user-specific key
  * @param {string} encryptedData - JSON string containing iv, authTag, and encrypted data
+ * @param {string} [userId] - Optional user ID for per-user decryption
  * @returns {string} - The decrypted plaintext
  */
-function decrypt(encryptedData) {
+function decrypt(encryptedData, userId = null) {
   if (!encryptedData) {
     throw new Error('Encrypted data cannot be empty');
   }
@@ -66,9 +89,14 @@ function decrypt(encryptedData) {
     throw new Error('Invalid encrypted data format');
   }
   
+  // Use user-specific key if userId provided, otherwise use master key
+  const encryptionKey = userId 
+    ? deriveUserKey(userId)
+    : crypto.scryptSync(MASTER_ENCRYPTION_KEY, 'salt', 32);
+  
   const decipher = crypto.createDecipheriv(
     ALGORITHM,
-    ENCRYPTION_KEY,
+    encryptionKey,
     Buffer.from(data.iv, 'hex')
   );
   
@@ -94,16 +122,42 @@ function redact(text) {
 }
 
 /**
- * Test encryption/decryption
- * @returns {boolean} - True if test passes
+ * Test encryption/decryption (both global and per-user)
+ * @returns {boolean} - True if all tests pass
  */
 function testEncryption() {
   try {
+    // Test global encryption (backward compatible)
     const testString = 'test-api-key-12345';
     const encrypted = encrypt(testString);
     const decrypted = decrypt(encrypted);
     
-    return testString === decrypted;
+    if (testString !== decrypted) {
+      console.error('Global encryption test failed');
+      return false;
+    }
+    
+    // Test per-user encryption
+    const testUserId = 'test-user-123';
+    const userEncrypted = encrypt(testString, testUserId);
+    const userDecrypted = decrypt(userEncrypted, testUserId);
+    
+    if (testString !== userDecrypted) {
+      console.error('Per-user encryption test failed');
+      return false;
+    }
+    
+    // Ensure user-encrypted data cannot be decrypted with different user key
+    try {
+      const differentUserId = 'different-user-456';
+      decrypt(userEncrypted, differentUserId);
+      console.error('User isolation test failed - data was decrypted with wrong user key');
+      return false;
+    } catch (error) {
+      // Expected - data should not decrypt with wrong user key
+    }
+    
+    return true;
   } catch (error) {
     console.error('Encryption test failed:', error.message);
     return false;
@@ -114,6 +168,7 @@ module.exports = {
   encrypt,
   decrypt,
   redact,
+  deriveUserKey,
   testEncryption
 };
 

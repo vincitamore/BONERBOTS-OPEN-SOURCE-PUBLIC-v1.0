@@ -78,11 +78,19 @@ const LiveLog: React.FC<LiveLogProps> = ({ botLogs, isLoading }) => {
                     <div className="space-y-3 border-t border-gray-700 pt-3">
                         {log.decisions.map((decision, index) => (
                              <div key={index}>
-                                <p className={`font-bold ${decision.action === AiAction.LONG ? 'text-green-400' : decision.action === AiAction.SHORT ? 'text-red-400' : 'text-white'}`}>
-                                    {decision.action} {decision.symbol || `ID: ${decision.closePositionId?.slice(0, 8)}...`}
+                                <p className={`font-bold ${decision.action === AiAction.LONG ? 'text-green-400' : decision.action === AiAction.SHORT ? 'text-red-400' : decision.action === AiAction.ANALYZE ? 'text-purple-400' : 'text-white'}`}>
+                                    {decision.action === AiAction.ANALYZE 
+                                      ? `${decision.action}: ${decision.tool || 'unknown'}`
+                                      : `${decision.action} ${decision.symbol || `ID: ${decision.closePositionId?.slice(0, 8)}...`}`
+                                    }
                                 </p>
                                 <p className="text-gray-400 mt-1">{decision.reasoning}</p>
                                 {decision.size && <span className="text-sm text-gray-500">Size: ${decision.size.toLocaleString()} @ {decision.leverage}x</span>}
+                                {decision.tool && decision.parameters && (
+                                  <span className="text-sm text-purple-300 block mt-1">
+                                    Parameters: {JSON.stringify(decision.parameters)}
+                                  </span>
+                                )}
                             </div>
                         ))}
                     </div>

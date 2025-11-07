@@ -34,6 +34,7 @@ db.pragma('foreign_keys = ON');
 
 /**
  * Get all bots with optional filters
+ * @param {Object} filters - Optional filters (active, trading_mode, provider_id, user_id)
  */
 function getBots(filters = {}) {
   let query = `
@@ -44,6 +45,12 @@ function getBots(filters = {}) {
   `;
   
   const params = [];
+  
+  // CRITICAL: Filter by user_id for multi-tenancy (unless admin viewing all)
+  if (filters.user_id) {
+    query += ' AND b.user_id = ?';
+    params.push(filters.user_id);
+  }
   
   if (filters.active !== undefined) {
     query += ' AND b.is_active = ?';
@@ -67,27 +74,41 @@ function getBots(filters = {}) {
 
 /**
  * Get a single bot by ID
+ * @param {string} botId - Bot ID
+ * @param {string} userId - User ID (optional, for ownership verification)
  */
-function getBot(botId) {
-  return db.prepare(`
+function getBot(botId, userId = null) {
+  let query = `
     SELECT b.*, lp.name as provider_name, lp.provider_type
     FROM bots b
     JOIN llm_providers lp ON b.provider_id = lp.id
     WHERE b.id = ?
-  `).get(botId);
+  `;
+  
+  const params = [botId];
+  
+  // If userId provided, verify ownership
+  if (userId) {
+    query += ' AND b.user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).get(...params);
 }
 
 /**
  * Create a new bot
+ * @param {Object} botData - Bot data including user_id
  */
 function createBot(botData) {
   const stmt = db.prepare(`
-    INSERT INTO bots (id, name, prompt, provider_id, trading_mode, is_active, is_paused, avatar_image)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bots (id, user_id, name, prompt, provider_id, trading_mode, is_active, is_paused, avatar_image)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   stmt.run(
     botData.id,
+    botData.user_id, // CRITICAL: Must provide user_id
     botData.name,
     botData.prompt,
     botData.provider_id,
@@ -102,8 +123,11 @@ function createBot(botData) {
 
 /**
  * Update a bot
+ * @param {string} botId - Bot ID
+ * @param {Object} updates - Fields to update
+ * @param {string} userId - User ID (for ownership verification)
  */
-function updateBot(botId, updates) {
+function updateBot(botId, updates, userId = null) {
   const allowedFields = ['name', 'prompt', 'provider_id', 'trading_mode', 'is_active', 'is_paused', 'avatar_image'];
   const setters = [];
   const params = [];
@@ -120,30 +144,58 @@ function updateBot(botId, updates) {
   }
   
   if (setters.length === 0) {
-    return getBot(botId);
+    return getBot(botId, userId);
   }
   
   setters.push('updated_at = CURRENT_TIMESTAMP');
   params.push(botId);
   
-  const query = `UPDATE bots SET ${setters.join(', ')} WHERE id = ?`;
+  let query = `UPDATE bots SET ${setters.join(', ')} WHERE id = ?`;
+  
+  // If userId provided, verify ownership
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
   db.prepare(query).run(...params);
   
-  return getBot(botId);
+  return getBot(botId, userId);
 }
 
 /**
  * Delete (soft delete) a bot
+ * @param {string} botId - Bot ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function deleteBot(botId) {
-  return db.prepare('UPDATE bots SET is_active = 0 WHERE id = ?').run(botId);
+function deleteBot(botId, userId = null) {
+  let query = 'UPDATE bots SET is_active = 0 WHERE id = ?';
+  const params = [botId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).run(...params);
 }
 
 /**
  * Toggle bot pause state
+ * @param {string} botId - Bot ID
+ * @param {boolean} isPaused - Pause state
+ * @param {string} userId - User ID (for ownership verification)
  */
-function toggleBotPause(botId, isPaused) {
-  return db.prepare('UPDATE bots SET is_paused = ? WHERE id = ?').run(isPaused ? 1 : 0, botId);
+function toggleBotPause(botId, isPaused, userId = null) {
+  let query = 'UPDATE bots SET is_paused = ? WHERE id = ?';
+  const params = [isPaused ? 1 : 0, botId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).run(...params);
 }
 
 // ============================================================================
@@ -152,10 +204,17 @@ function toggleBotPause(botId, isPaused) {
 
 /**
  * Get all LLM providers
+ * @param {Object} filters - Optional filters (active, provider_type, user_id)
  */
 function getProviders(filters = {}) {
   let query = 'SELECT * FROM llm_providers WHERE 1=1';
   const params = [];
+  
+  // CRITICAL: Filter by user_id for multi-tenancy
+  if (filters.user_id) {
+    query += ' AND user_id = ?';
+    params.push(filters.user_id);
+  }
   
   if (filters.active !== undefined) {
     query += ' AND is_active = ?';
@@ -174,21 +233,33 @@ function getProviders(filters = {}) {
 
 /**
  * Get a single provider by ID
+ * @param {number} providerId - Provider ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function getProvider(providerId) {
-  return db.prepare('SELECT * FROM llm_providers WHERE id = ?').get(providerId);
+function getProvider(providerId, userId = null) {
+  let query = 'SELECT * FROM llm_providers WHERE id = ?';
+  const params = [providerId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).get(...params);
 }
 
 /**
  * Create a new LLM provider
+ * @param {Object} providerData - Provider data including user_id
  */
 function createProvider(providerData) {
   const stmt = db.prepare(`
-    INSERT INTO llm_providers (name, provider_type, api_endpoint, model_name, api_key_encrypted, config_json, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO llm_providers (user_id, name, provider_type, api_endpoint, model_name, api_key_encrypted, config_json, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   const result = stmt.run(
+    providerData.user_id, // CRITICAL: Must provide user_id
     providerData.name,
     providerData.provider_type,
     providerData.api_endpoint,
@@ -203,8 +274,11 @@ function createProvider(providerData) {
 
 /**
  * Update a provider
+ * @param {number} providerId - Provider ID
+ * @param {Object} updates - Fields to update
+ * @param {string} userId - User ID (for ownership verification)
  */
-function updateProvider(providerId, updates) {
+function updateProvider(providerId, updates, userId = null) {
   const allowedFields = ['name', 'provider_type', 'api_endpoint', 'model_name', 'api_key_encrypted', 'config_json', 'is_active'];
   const setters = [];
   const params = [];
@@ -221,30 +295,54 @@ function updateProvider(providerId, updates) {
   }
   
   if (setters.length === 0) {
-    return getProvider(providerId);
+    return getProvider(providerId, userId);
   }
   
   setters.push('updated_at = CURRENT_TIMESTAMP');
   params.push(providerId);
   
-  const query = `UPDATE llm_providers SET ${setters.join(', ')} WHERE id = ?`;
+  let query = `UPDATE llm_providers SET ${setters.join(', ')} WHERE id = ?`;
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
   db.prepare(query).run(...params);
   
-  return getProvider(providerId);
+  return getProvider(providerId, userId);
 }
 
 /**
  * Delete a provider
+ * @param {number} providerId - Provider ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function deleteProvider(providerId) {
+function deleteProvider(providerId, userId = null) {
   // Check if any bots are using this provider
-  const botsCount = db.prepare('SELECT COUNT(*) as count FROM bots WHERE provider_id = ?').get(providerId);
+  let checkQuery = 'SELECT COUNT(*) as count FROM bots WHERE provider_id = ?';
+  const checkParams = [providerId];
+  
+  if (userId) {
+    checkQuery += ' AND user_id = ?';
+    checkParams.push(userId);
+  }
+  
+  const botsCount = db.prepare(checkQuery).get(...checkParams);
   
   if (botsCount.count > 0) {
     throw new Error(`Cannot delete provider: ${botsCount.count} bot(s) are using it`);
   }
   
-  return db.prepare('DELETE FROM llm_providers WHERE id = ?').run(providerId);
+  let deleteQuery = 'DELETE FROM llm_providers WHERE id = ?';
+  const deleteParams = [providerId];
+  
+  if (userId) {
+    deleteQuery += ' AND user_id = ?';
+    deleteParams.push(userId);
+  }
+  
+  return db.prepare(deleteQuery).run(...deleteParams);
 }
 
 // ============================================================================
@@ -253,28 +351,50 @@ function deleteProvider(providerId) {
 
 /**
  * Get wallets by bot ID
+ * @param {string} botId - Bot ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function getWalletsByBot(botId) {
-  return db.prepare('SELECT * FROM wallets WHERE bot_id = ? AND is_active = 1').all(botId);
+function getWalletsByBot(botId, userId = null) {
+  let query = 'SELECT * FROM wallets WHERE bot_id = ? AND is_active = 1';
+  const params = [botId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).all(...params);
 }
 
 /**
  * Get a specific wallet
+ * @param {number} walletId - Wallet ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function getWallet(walletId) {
-  return db.prepare('SELECT * FROM wallets WHERE id = ?').get(walletId);
+function getWallet(walletId, userId = null) {
+  let query = 'SELECT * FROM wallets WHERE id = ?';
+  const params = [walletId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).get(...params);
 }
 
 /**
  * Create a wallet
+ * @param {Object} walletData - Wallet data including user_id
  */
 function createWallet(walletData) {
   const stmt = db.prepare(`
-    INSERT INTO wallets (bot_id, exchange, api_key_encrypted, api_secret_encrypted, wallet_address, is_active)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO wallets (user_id, bot_id, exchange, api_key_encrypted, api_secret_encrypted, wallet_address, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   const result = stmt.run(
+    walletData.user_id, // CRITICAL: Must provide user_id
     walletData.bot_id,
     walletData.exchange,
     walletData.api_key_encrypted,
@@ -288,8 +408,11 @@ function createWallet(walletData) {
 
 /**
  * Update a wallet
+ * @param {number} walletId - Wallet ID
+ * @param {Object} updates - Fields to update
+ * @param {string} userId - User ID (for ownership verification)
  */
-function updateWallet(walletId, updates) {
+function updateWallet(walletId, updates, userId = null) {
   const allowedFields = ['exchange', 'api_key_encrypted', 'api_secret_encrypted', 'wallet_address', 'is_active'];
   const setters = [];
   const params = [];
@@ -306,23 +429,39 @@ function updateWallet(walletId, updates) {
   }
   
   if (setters.length === 0) {
-    return getWallet(walletId);
+    return getWallet(walletId, userId);
   }
   
   setters.push('updated_at = CURRENT_TIMESTAMP');
   params.push(walletId);
   
-  const query = `UPDATE wallets SET ${setters.join(', ')} WHERE id = ?`;
+  let query = `UPDATE wallets SET ${setters.join(', ')} WHERE id = ?`;
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
   db.prepare(query).run(...params);
   
-  return getWallet(walletId);
+  return getWallet(walletId, userId);
 }
 
 /**
  * Delete a wallet
+ * @param {number} walletId - Wallet ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function deleteWallet(walletId) {
-  return db.prepare('DELETE FROM wallets WHERE id = ?').run(walletId);
+function deleteWallet(walletId, userId = null) {
+  let query = 'DELETE FROM wallets WHERE id = ?';
+  const params = [walletId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).run(...params);
 }
 
 // ============================================================================
@@ -331,14 +470,16 @@ function deleteWallet(walletId) {
 
 /**
  * Create a bot state snapshot
+ * @param {Object} snapshotData - Snapshot data including user_id
  */
 function createSnapshot(snapshotData) {
   const stmt = db.prepare(`
-    INSERT INTO bot_state_snapshots (bot_id, balance, unrealized_pnl, realized_pnl, total_value, trade_count, win_rate, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bot_state_snapshots (user_id, bot_id, balance, unrealized_pnl, realized_pnl, total_value, trade_count, win_rate, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   return stmt.run(
+    snapshotData.user_id, // CRITICAL: Must provide user_id
     snapshotData.bot_id,
     snapshotData.balance,
     snapshotData.unrealized_pnl,
@@ -352,10 +493,19 @@ function createSnapshot(snapshotData) {
 
 /**
  * Get bot snapshots within a time range
+ * @param {string} botId - Bot ID
+ * @param {string} startDate - Start date
+ * @param {string} endDate - End date
+ * @param {string} userId - User ID (for ownership verification)
  */
-function getBotSnapshots(botId, startDate, endDate) {
+function getBotSnapshots(botId, startDate, endDate, userId = null) {
   let query = 'SELECT * FROM bot_state_snapshots WHERE bot_id = ?';
   const params = [botId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
   
   if (startDate) {
     query += ' AND timestamp >= ?';
@@ -378,22 +528,37 @@ function getBotSnapshots(botId, startDate, endDate) {
 
 /**
  * Get positions for a bot
+ * @param {string} botId - Bot ID
+ * @param {string} status - Position status
+ * @param {string} userId - User ID (for ownership verification)
  */
-function getPositions(botId, status = 'open') {
-  return db.prepare('SELECT * FROM positions WHERE bot_id = ? AND status = ? ORDER BY opened_at DESC').all(botId, status);
+function getPositions(botId, status = 'open', userId = null) {
+  let query = 'SELECT * FROM positions WHERE bot_id = ? AND status = ?';
+  const params = [botId, status];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  query += ' ORDER BY opened_at DESC';
+  
+  return db.prepare(query).all(...params);
 }
 
 /**
  * Create a position
+ * @param {Object} positionData - Position data including user_id
  */
 function createPosition(positionData) {
   const stmt = db.prepare(`
-    INSERT INTO positions (id, bot_id, symbol, position_type, entry_price, size, leverage, liquidation_price, stop_loss, take_profit, unrealized_pnl, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO positions (id, user_id, bot_id, symbol, position_type, entry_price, size, leverage, liquidation_price, stop_loss, take_profit, unrealized_pnl, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   return stmt.run(
     positionData.id,
+    positionData.user_id, // CRITICAL: Must provide user_id
     positionData.bot_id,
     positionData.symbol,
     positionData.position_type,
@@ -410,8 +575,11 @@ function createPosition(positionData) {
 
 /**
  * Update a position
+ * @param {string} positionId - Position ID
+ * @param {Object} updates - Fields to update
+ * @param {string} userId - User ID (for ownership verification)
  */
-function updatePosition(positionId, updates) {
+function updatePosition(positionId, updates, userId = null) {
   const allowedFields = ['unrealized_pnl', 'stop_loss', 'take_profit', 'status', 'closed_at'];
   const setters = [];
   const params = [];
@@ -429,15 +597,31 @@ function updatePosition(positionId, updates) {
   
   params.push(positionId);
   
-  const query = `UPDATE positions SET ${setters.join(', ')} WHERE id = ?`;
+  let query = `UPDATE positions SET ${setters.join(', ')} WHERE id = ?`;
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
   db.prepare(query).run(...params);
 }
 
 /**
  * Close a position
+ * @param {string} positionId - Position ID
+ * @param {string} userId - User ID (for ownership verification)
  */
-function closePosition(positionId) {
-  return db.prepare('UPDATE positions SET status = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?').run('closed', positionId);
+function closePosition(positionId, userId = null) {
+  let query = 'UPDATE positions SET status = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?';
+  const params = ['closed', positionId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  return db.prepare(query).run(...params);
 }
 
 // ============================================================================
@@ -446,10 +630,22 @@ function closePosition(positionId) {
 
 /**
  * Get trades for a bot
+ * @param {string} botId - Bot ID
+ * @param {Object} filters - Optional filters (symbol, start_date, end_date, limit, offset, user_id)
  */
 function getTrades(botId, filters = {}) {
   let query = 'SELECT * FROM trades WHERE bot_id = ?';
   const params = [botId];
+  
+  if (filters.user_id) {
+    query += ' AND user_id = ?';
+    params.push(filters.user_id);
+  }
+  
+  if (filters.action) {
+    query += ' AND action = ?';
+    params.push(filters.action);
+  }
   
   if (filters.symbol) {
     query += ' AND symbol = ?';
@@ -483,15 +679,17 @@ function getTrades(botId, filters = {}) {
 
 /**
  * Create a trade
+ * @param {Object} tradeData - Trade data including user_id
  */
 function createTrade(tradeData) {
   const stmt = db.prepare(`
-    INSERT INTO trades (id, bot_id, position_id, symbol, trade_type, action, entry_price, exit_price, size, leverage, pnl, fee, executed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (id, user_id, bot_id, position_id, symbol, trade_type, action, entry_price, exit_price, size, leverage, pnl, fee, executed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   return stmt.run(
     tradeData.id,
+    tradeData.user_id, // CRITICAL: Must provide user_id
     tradeData.bot_id,
     tradeData.position_id || null,
     tradeData.symbol,
@@ -513,14 +711,16 @@ function createTrade(tradeData) {
 
 /**
  * Create a bot decision log
+ * @param {Object} decisionData - Decision data including user_id
  */
 function createDecision(decisionData) {
   const stmt = db.prepare(`
-    INSERT INTO bot_decisions (bot_id, prompt_sent, decisions_json, notes_json, execution_success, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO bot_decisions (user_id, bot_id, prompt_sent, decisions_json, notes_json, execution_success, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   return stmt.run(
+    decisionData.user_id, // CRITICAL: Must provide user_id
     decisionData.bot_id,
     decisionData.prompt_sent,
     JSON.stringify(decisionData.decisions),
@@ -532,9 +732,23 @@ function createDecision(decisionData) {
 
 /**
  * Get bot decisions
+ * @param {string} botId - Bot ID
+ * @param {number} limit - Max number of decisions to return
+ * @param {string} userId - User ID (for ownership verification)
  */
-function getBotDecisions(botId, limit = 50) {
-  return db.prepare('SELECT * FROM bot_decisions WHERE bot_id = ? ORDER BY timestamp DESC LIMIT ?').all(botId, limit);
+function getBotDecisions(botId, limit = 50, userId = null) {
+  let query = 'SELECT * FROM bot_decisions WHERE bot_id = ?';
+  const params = [botId];
+  
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+  
+  query += ' ORDER BY timestamp DESC LIMIT ?';
+  params.push(limit);
+  
+  return db.prepare(query).all(...params);
 }
 
 // ============================================================================
@@ -651,18 +865,18 @@ function updateSetting(key, value) {
  */
 function createAuditLog(logData) {
   const stmt = db.prepare(`
-    INSERT INTO audit_log (event_type, entity_type, entity_id, user_id, details_json, ip_address, timestamp)
+    INSERT INTO audit_log (action, resource_type, resource_id, user_id, details, ip_address, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   return stmt.run(
-    logData.event_type,
-    logData.entity_type,
-    logData.entity_id || null,
+    logData.event_type || logData.action,
+    logData.entity_type || logData.resource_type,
+    logData.entity_id || logData.resource_id || null,
     logData.user_id || null,
     JSON.stringify(logData.details || {}),
     logData.ip_address || null,
-    logData.timestamp || new Date().toISOString()
+    logData.timestamp || logData.created_at || new Date().toISOString()
   );
 }
 
@@ -673,27 +887,27 @@ function getAuditLogs(filters = {}) {
   let query = 'SELECT * FROM audit_log WHERE 1=1';
   const params = [];
   
-  if (filters.event_type) {
-    query += ' AND event_type = ?';
-    params.push(filters.event_type);
+  if (filters.event_type || filters.action) {
+    query += ' AND action = ?';
+    params.push(filters.event_type || filters.action);
   }
   
-  if (filters.entity_type) {
-    query += ' AND entity_type = ?';
-    params.push(filters.entity_type);
+  if (filters.entity_type || filters.resource_type) {
+    query += ' AND resource_type = ?';
+    params.push(filters.entity_type || filters.resource_type);
   }
   
   if (filters.start_date) {
-    query += ' AND timestamp >= ?';
+    query += ' AND created_at >= ?';
     params.push(filters.start_date);
   }
   
   if (filters.end_date) {
-    query += ' AND timestamp <= ?';
+    query += ' AND created_at <= ?';
     params.push(filters.end_date);
   }
   
-  query += ' ORDER BY timestamp DESC';
+  query += ' ORDER BY created_at DESC';
   
   if (filters.limit) {
     query += ' LIMIT ?';
@@ -777,6 +991,8 @@ module.exports = {
   getAuditLogs,
   // Utilities
   closeDatabase,
-  hasRelationalSchema
+  hasRelationalSchema,
+  // Direct database access for custom queries
+  prepare: (sql) => db.prepare(sql)
 };
 

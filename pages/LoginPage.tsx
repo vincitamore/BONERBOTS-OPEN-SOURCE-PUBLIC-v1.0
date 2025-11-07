@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -96,12 +98,34 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
           </div>
-
-          <div className="text-center text-sm text-gray-400">
-            <p>Default credentials:</p>
-            <p className="text-gray-300 font-mono">admin / admin123</p>
-          </div>
         </form>
+
+        <div className="mt-6 space-y-4">
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-700"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-gray-800 text-gray-400">New to BONERBOTS?</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => navigate('/register')}
+            className="w-full flex justify-center py-3 px-4 border border-gray-600 rounded-lg text-sm font-medium text-gray-300 bg-gray-700/50 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all duration-200"
+          >
+            Create an account
+          </button>
+
+          <div className="text-center">
+            <button
+              onClick={() => navigate('/recover')}
+              className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+            >
+              Forgot your password?
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

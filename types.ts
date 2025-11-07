@@ -2,7 +2,7 @@
 
 export type AppMode = 'broadcast' | 'spectator';
 
-export type ModalContentType = 'positions' | 'history' | 'log' | 'info';
+export type ModalContentType = 'positions' | 'history' | 'log' | 'learning' | 'info';
 
 export interface Market {
   symbol: string;
@@ -40,6 +40,7 @@ export enum AiAction {
   SHORT = 'SHORT',
   CLOSE = 'CLOSE',
   HOLD = 'HOLD',
+  ANALYZE = 'ANALYZE',
 }
 
 export interface AiDecision {
@@ -51,6 +52,9 @@ export interface AiDecision {
   takeProfit?: number;
   closePositionId?: string;
   reasoning: string;
+  // For ANALYZE actions (sandbox tool invocation)
+  tool?: string;
+  parameters?: Record<string, any>;
 }
 
 export interface BotLog {

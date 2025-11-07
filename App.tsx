@@ -7,21 +7,50 @@ import SpectatorDashboard from './components/SpectatorDashboard';
 import ConfigurationWarning from './components/ConfigurationWarning';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ConfigurationProvider } from './context/ConfigurationContext';
+import { ToastProvider } from './context/ToastContext';
+import { ToastContainer } from './components/Toast';
 import { LoginPage } from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import RecoverAccountPage from './pages/RecoverAccountPage';
+import AccountSettingsPage from './pages/AccountSettingsPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import UserManagementPage from './pages/admin/UserManagementPage';
+import SystemSettingsPage from './pages/admin/SystemSettingsPage';
 import { BotsPage } from './pages/config/BotsPage';
 import { BotEditorPage } from './pages/config/BotEditorPage';
 import { ProvidersPage } from './pages/config/ProvidersPage';
-import { SettingsPage } from './pages/config/SettingsPage';
 import { CredentialsPage } from './pages/config/CredentialsPage';
 import { AnalyticsPage } from './pages/analytics/AnalyticsPage';
 import { BotDeepDivePage } from './pages/analytics/BotDeepDivePage';
 import { AppMode } from './types';
 import { isAppConfigured } from './config';
 
+// Admin Route Wrapper - Only accessible by admins
+const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  
+  if (user?.role !== 'admin') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-red-500 mb-4">Access Denied</h1>
+          <p className="text-gray-400 mb-6">You do not have permission to access this page.</p>
+          <Link to="/dashboard" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium">
+            Return to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  
+  return <>{children}</>;
+};
+
 // Navigation Component
 const Navigation: React.FC = () => {
   const location = useLocation();
-  const { logout, user } = useAuth();
+  const { logout, user, isAdmin } = useAuth();
   
   const isActive = (path: string) => {
     return location.pathname.startsWith(path);
@@ -46,6 +75,9 @@ const Navigation: React.FC = () => {
             <Link to="/analytics" className={navLinkClass('/analytics')}>
               Analytics
             </Link>
+            <Link to="/leaderboard" className={navLinkClass('/leaderboard')}>
+              Leaderboard
+            </Link>
             <Link to="/config/bots" className={navLinkClass('/config/bots')}>
               Bots
             </Link>
@@ -55,14 +87,21 @@ const Navigation: React.FC = () => {
             <Link to="/config/credentials" className={navLinkClass('/config/credentials')}>
               API Keys
             </Link>
-            <Link to="/config/settings" className={navLinkClass('/config/settings')}>
-              Settings
-            </Link>
+            {/* Admin-only navigation link */}
+            {isAdmin && (
+              <Link to="/admin" className={navLinkClass('/admin')}>
+                Admin
+              </Link>
+            )}
           </div>
           <div className="flex items-center gap-2 sm:gap-3 ml-2 sm:ml-4 shrink-0">
-            <span className="text-xs sm:text-sm text-gray-400 hidden sm:inline">
-              {user?.username}
-            </span>
+            <Link 
+              to="/account"
+              className="text-xs sm:text-sm text-gray-400 hover:text-white transition-colors hidden sm:inline"
+              title="Account Settings"
+            >
+              👤 {user?.username}
+            </Link>
             <button
               onClick={logout}
               className="px-3 sm:px-4 py-2 text-sm rounded-lg font-medium transition-colors bg-red-600 hover:bg-red-700 text-white whitespace-nowrap"
@@ -135,6 +174,7 @@ const DashboardRoutes: React.FC = () => {
 // Auth-protected routes wrapper
 const AuthenticatedApp: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -144,10 +184,31 @@ const AuthenticatedApp: React.FC = () => {
     );
   }
 
-  if (!isAuthenticated) {
+  // Public routes accessible without authentication
+  const publicRoutes = ['/login', '/register', '/recover'];
+  const isPublicRoute = publicRoutes.includes(location.pathname);
+
+  if (!isAuthenticated && !isPublicRoute) {
     return <LoginPage />;
   }
 
+  if (isAuthenticated && isPublicRoute) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Render public routes without authentication
+  if (!isAuthenticated) {
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/recover" element={<RecoverAccountPage />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
+
+  // Render authenticated routes
   return (
     <ConfigurationProvider>
       <Routes>
@@ -167,6 +228,13 @@ const AuthenticatedApp: React.FC = () => {
         <Route path="/analytics/bot/:botId" element={
           <AppLayout>
             <BotDeepDivePage />
+          </AppLayout>
+        } />
+
+        {/* Leaderboard Route */}
+        <Route path="/leaderboard" element={
+          <AppLayout>
+            <LeaderboardPage />
           </AppLayout>
         } />
 
@@ -191,9 +259,34 @@ const AuthenticatedApp: React.FC = () => {
             <CredentialsPage />
           </AppLayout>
         } />
-        <Route path="/config/settings" element={
+
+        {/* Account Settings Route */}
+        <Route path="/account" element={
           <AppLayout>
-            <SettingsPage />
+            <AccountSettingsPage />
+          </AppLayout>
+        } />
+
+        {/* Admin Routes - Only accessible by admins */}
+        <Route path="/admin" element={
+          <AppLayout>
+            <AdminRoute>
+              <AdminDashboard />
+            </AdminRoute>
+          </AppLayout>
+        } />
+        <Route path="/admin/users" element={
+          <AppLayout>
+            <AdminRoute>
+              <UserManagementPage />
+            </AdminRoute>
+          </AppLayout>
+        } />
+        <Route path="/admin/settings" element={
+          <AppLayout>
+            <AdminRoute>
+              <SystemSettingsPage />
+            </AdminRoute>
           </AppLayout>
         } />
 
@@ -213,7 +306,10 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AuthenticatedApp />
+        <ToastProvider>
+          <AuthenticatedApp />
+          <ToastContainer />
+        </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
   );

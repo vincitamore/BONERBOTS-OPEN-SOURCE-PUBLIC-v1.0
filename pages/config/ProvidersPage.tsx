@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react';
 import { useConfiguration } from '../../context/ConfigurationContext';
+import { useToast } from '../../context/ToastContext';
 import { TextInput } from '../../components/forms/TextInput';
 import { PasswordInput } from '../../components/forms/PasswordInput';
 import { SelectDropdown, SelectOption } from '../../components/forms/SelectDropdown';
@@ -13,6 +14,7 @@ import { TextArea } from '../../components/forms/TextArea';
 
 export const ProvidersPage: React.FC = () => {
   const { providers, createProvider, updateProvider, deleteProvider, testProvider, loading } = useConfiguration();
+  const { showToast, confirm } = useToast();
 
   const [showModal, setShowModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<number | null>(null);
@@ -154,9 +156,10 @@ export const ProvidersPage: React.FC = () => {
         await createProvider(providerData);
       }
 
+      showToast('Provider saved successfully!', 'success');
       closeModal();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to save provider');
+      showToast(error instanceof Error ? error.message : 'Failed to save provider', 'error');
     } finally {
       setSaving(false);
     }
@@ -182,15 +185,20 @@ export const ProvidersPage: React.FC = () => {
 
   // Delete provider
   const handleDelete = async (providerId: number, providerName: string) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${providerName}"? This action cannot be undone.`
-    );
+    const confirmed = await confirm({
+      title: 'Delete Provider',
+      message: `Are you sure you want to delete "${providerName}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger',
+    });
     if (!confirmed) return;
 
     try {
       await deleteProvider(providerId);
+      showToast(`Provider "${providerName}" deleted successfully.`, 'success');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to delete provider');
+      showToast(error instanceof Error ? error.message : 'Failed to delete provider', 'error');
     }
   };
 

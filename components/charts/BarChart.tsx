@@ -23,7 +23,8 @@ export const BarChart: React.FC<BarChartProps> = ({
   horizontal = false
 }) => {
   const maxValue = Math.max(...data.map(d => Math.abs(d.value)), 0);
-  const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+  // Default color palette for non-P&L charts (when custom colors aren't provided)
+  const defaultColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
   // Handle case where all values are 0 or no data
   if (maxValue === 0 || data.length === 0) {
@@ -49,7 +50,15 @@ export const BarChart: React.FC<BarChartProps> = ({
         {data.map((item, index) => {
           const percentage = (Math.abs(item.value) / maxValue) * 100;
           const isNegative = item.value < 0;
-          const barColor = item.color || colors[index % colors.length];
+          
+          // If item has custom color, use it; otherwise intelligently choose based on value
+          // For P&L charts (negative values exist), use green/red based on profit/loss
+          // For other charts (all positive), use the default color palette
+          const hasNegativeValues = data.some(d => d.value < 0);
+          const barColor = item.color || (hasNegativeValues 
+            ? (isNegative ? '#ef4444' : '#10b981') // Red for loss, green for profit
+            : defaultColors[index % defaultColors.length] // Use palette for non-P&L charts
+          );
 
           return (
             <div key={item.label} className="flex items-center gap-3">
@@ -63,7 +72,6 @@ export const BarChart: React.FC<BarChartProps> = ({
                     style={{
                       width: `${percentage}%`,
                       backgroundColor: barColor,
-                      opacity: isNegative ? 0.7 : 1,
                     }}
                   />
                 </div>

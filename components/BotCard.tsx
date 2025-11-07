@@ -5,6 +5,7 @@ import PlayIcon from './icons/PlayIcon';
 import PauseIcon from './icons/PauseIcon';
 import RefreshIcon from './icons/RefreshIcon';
 import ResetIcon from './icons/ResetIcon';
+import Tooltip from './Tooltip';
 
 interface BotCardProps {
   bot: SerializableBotState;
@@ -16,6 +17,8 @@ interface BotCardProps {
   onTogglePause?: () => void;
   onForceTurn?: () => void;
   onReset?: () => void;
+  onForceSummarize?: () => void;
+  onClearLearning?: () => void;
 }
 
 const botColorMap: { [key: string]: string } = {
@@ -34,7 +37,7 @@ const getPnlColor = (value: number) => {
     return 'text-gray-400';
 };
 
-const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 10000, onOpenModal, onTogglePause, onForceTurn, onReset }) => {
+const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 10000, onOpenModal, onTogglePause, onForceTurn, onReset, onForceSummarize, onClearLearning }) => {
     const { portfolio, realizedPnl, winRate, tradeCount, isPaused, tradingMode, avatarUrl } = bot;
     const { totalValue, balance, pnl: unrealizedPnl } = portfolio;
     const isLive = tradingMode === 'real';
@@ -67,15 +70,39 @@ const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 100
 
              {mode === 'broadcast' && (
                 <div className="flex items-center justify-center space-x-3 bg-gray-900/50 p-2 rounded-md">
-                    <button onClick={onTogglePause} title={isPaused ? "Resume Bot" : "Pause Bot"} className="text-gray-400 hover:text-white transition-colors">
+                    <Tooltip content={isPaused ? "Resume Bot" : "Pause Bot"} position="top">
+                        <button onClick={onTogglePause} className="text-gray-400 hover:text-white transition-colors">
                         {isPaused ? <PlayIcon className="h-6 w-6 text-green-400" /> : <PauseIcon className="h-6 w-6 text-yellow-400" />}
                     </button>
-                     <button onClick={onForceTurn} title="Force Turn" className="text-gray-400 hover:text-white transition-colors">
+                    </Tooltip>
+                    
+                    <Tooltip content="Force Trading Turn" position="top">
+                        <button onClick={onForceTurn} className="text-gray-400 hover:text-white transition-colors">
                         <RefreshIcon className="h-6 w-6" />
                     </button>
-                     <button onClick={onReset} disabled={isLive} title={isLive ? "Cannot reset a live bot" : "Reset Bot"} className="text-gray-400 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                    </Tooltip>
+                    
+                    <Tooltip content="Generate Learning Summary" position="top">
+                        <button onClick={onForceSummarize} className="text-gray-400 hover:text-indigo-400 transition-colors">
+                        <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                    </button>
+                    </Tooltip>
+                    
+                    <Tooltip content="Clear Learning History (keeps trades/positions)" position="top">
+                        <button onClick={onClearLearning} className="text-gray-400 hover:text-purple-400 transition-colors">
+                            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                    </Tooltip>
+                    
+                    <Tooltip content={isLive ? "Cannot reset a live bot" : "Reset Bot (clears everything)"} position="top">
+                        <button onClick={onReset} disabled={isLive} className="text-gray-400 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                         <ResetIcon className="h-6 w-6 text-red-400" />
                     </button>
+                    </Tooltip>
                 </div>
             )}
 
@@ -104,11 +131,32 @@ const BotCard: React.FC<BotCardProps> = ({ bot, rank, mode, initialBalance = 100
             </div>
 
             {/* Action Buttons */}
-            <div className="grid grid-cols-4 gap-2 text-xs pt-2 border-t border-gray-700">
-                <button onClick={() => onOpenModal('positions')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">Positions ({bot.portfolio.positions.length})</button>
-                <button onClick={() => onOpenModal('history')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">History ({bot.orders.length})</button>
-                <button onClick={() => onOpenModal('log')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">AI Log</button>
-                <button onClick={() => onOpenModal('info')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">Info</button>
+            <div className="grid grid-cols-5 gap-2 text-xs pt-2 border-t border-gray-700">
+                <Tooltip content="View open positions" position="top">
+                    <button onClick={() => onOpenModal('positions')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">
+                        Positions ({bot.portfolio.positions.length})
+                    </button>
+                </Tooltip>
+                <Tooltip content="View trade history" position="top">
+                    <button onClick={() => onOpenModal('history')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">
+                        History ({bot.orders.length})
+                    </button>
+                </Tooltip>
+                <Tooltip content="View AI decision logs" position="top">
+                    <button onClick={() => onOpenModal('log')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">
+                        AI Log
+                    </button>
+                </Tooltip>
+                <Tooltip content="View learning history summary" position="top">
+                    <button onClick={() => onOpenModal('learning')} className="bg-indigo-700/50 hover:bg-indigo-700/80 text-indigo-200 py-2 rounded-md transition-colors">
+                        Learning
+                    </button>
+                </Tooltip>
+                <Tooltip content="View bot info" position="top">
+                    <button onClick={() => onOpenModal('info')} className="bg-gray-700/50 hover:bg-gray-700/80 text-gray-300 py-2 rounded-md transition-colors">
+                        Info
+                    </button>
+                </Tooltip>
             </div>
         </div>
     );

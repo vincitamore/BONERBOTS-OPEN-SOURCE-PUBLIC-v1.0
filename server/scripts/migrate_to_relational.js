@@ -102,26 +102,26 @@ function transformAndInsertData(db, oldState) {
   
   const insertSnapshot = db.prepare(`
     INSERT INTO bot_state_snapshots 
-    (bot_id, balance, unrealized_pnl, realized_pnl, total_value, trade_count, win_rate, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    (user_id, bot_id, balance, unrealized_pnl, realized_pnl, total_value, trade_count, win_rate, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   const insertPosition = db.prepare(`
     INSERT OR REPLACE INTO positions 
-    (id, bot_id, symbol, position_type, entry_price, size, leverage, liquidation_price, stop_loss, take_profit, unrealized_pnl, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, user_id, bot_id, symbol, position_type, entry_price, size, leverage, liquidation_price, stop_loss, take_profit, unrealized_pnl, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   const insertTrade = db.prepare(`
     INSERT OR REPLACE INTO trades 
-    (id, bot_id, symbol, trade_type, action, entry_price, exit_price, size, leverage, pnl, fee, executed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, user_id, bot_id, position_id, symbol, trade_type, action, entry_price, exit_price, size, leverage, pnl, fee, executed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   const insertDecision = db.prepare(`
     INSERT INTO bot_decisions 
-    (bot_id, prompt_sent, decisions_json, notes_json, execution_success, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
+    (user_id, bot_id, prompt_sent, decisions_json, notes_json, execution_success, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   for (const bot of oldState.bots) {
@@ -143,6 +143,7 @@ function transformAndInsertData(db, oldState) {
       if (bot.valueHistory && bot.valueHistory.length > 0) {
         for (const point of bot.valueHistory) {
           insertSnapshot.run(
+            bot.userId, // user_id
             bot.id,
             bot.portfolio?.balance || 0,
             bot.portfolio?.pnl || 0,
@@ -161,6 +162,7 @@ function transformAndInsertData(db, oldState) {
         for (const pos of bot.portfolio.positions) {
           insertPosition.run(
             pos.id,
+            bot.userId, // user_id
             bot.id,
             pos.symbol,
             pos.type,
@@ -178,20 +180,33 @@ function transformAndInsertData(db, oldState) {
       }
       
       // Insert trades
+      // bot.orders contains both entry and exit trades
+      // We need to determine which is which based on the data structure
       if (bot.orders && bot.orders.length > 0) {
         for (const trade of bot.orders) {
+          // Determine if this is an entry or exit trade
+          // Entry trades typically have only entryPrice, exit trades have both entry and exit
+          const isExitTrade = trade.exitPrice !== undefined && trade.exitPrice !== null && trade.exitPrice > 0;
+          const action = isExitTrade ? 'CLOSE' : 'OPEN';
+          
+          // Try to find matching position ID if this trade references a position
+          // For now, use null - position_id can be linked later if needed
+          const positionId = null;
+          
           insertTrade.run(
             trade.id,
+            bot.userId, // user_id
             bot.id,
+            positionId, // position_id - null for historical data
             trade.symbol,
-            trade.type,
-            'CLOSE', // Assuming historical orders are closed trades
-            trade.entryPrice,
+            trade.type, // trade_type (LONG or SHORT)
+            action, // action (OPEN or CLOSE)
+            trade.entryPrice || trade.price || 0,
             trade.exitPrice || null,
             trade.size,
-            trade.leverage,
-            trade.pnl,
-            trade.fee,
+            trade.leverage || 1,
+            trade.pnl || 0,
+            trade.fee || 0,
             new Date(trade.timestamp).toISOString()
           );
         }
@@ -202,6 +217,7 @@ function transformAndInsertData(db, oldState) {
       if (bot.botLogs && bot.botLogs.length > 0) {
         for (const logEntry of bot.botLogs) {
           insertDecision.run(
+            bot.userId, // user_id
             bot.id,
             logEntry.prompt || '',
             JSON.stringify(logEntry.decisions || []),
@@ -289,6 +305,62 @@ function verifyMigration(db, oldState) {
     }
     log(`LLM providers verified: ${providersCount} providers`);
     
+    // Verify trade counts match
+    const totalTradesInDb = db.prepare('SELECT COUNT(*) as count FROM trades').get().count;
+    let expectedTradeCount = 0;
+    if (oldState.bots) {
+      for (const bot of oldState.bots) {
+        expectedTradeCount += bot.orders?.length || 0;
+      }
+    }
+    if (totalTradesInDb !== expectedTradeCount) {
+      throw new Error(`Trade count mismatch: expected ${expectedTradeCount}, got ${totalTradesInDb}`);
+    }
+    log(`Trade count verified: ${totalTradesInDb} trades migrated`);
+    
+    // Verify position counts match
+    const totalPositionsInDb = db.prepare('SELECT COUNT(*) as count FROM positions').get().count;
+    let expectedPositionCount = 0;
+    if (oldState.bots) {
+      for (const bot of oldState.bots) {
+        expectedPositionCount += bot.portfolio?.positions?.length || 0;
+      }
+    }
+    if (totalPositionsInDb !== expectedPositionCount) {
+      throw new Error(`Position count mismatch: expected ${expectedPositionCount}, got ${totalPositionsInDb}`);
+    }
+    log(`Position count verified: ${totalPositionsInDb} positions migrated`);
+    
+    // Verify decision counts match
+    const totalDecisionsInDb = db.prepare('SELECT COUNT(*) as count FROM bot_decisions').get().count;
+    let expectedDecisionCount = 0;
+    if (oldState.bots) {
+      for (const bot of oldState.bots) {
+        expectedDecisionCount += bot.botLogs?.length || 0;
+      }
+    }
+    if (totalDecisionsInDb !== expectedDecisionCount) {
+      throw new Error(`Decision count mismatch: expected ${expectedDecisionCount}, got ${totalDecisionsInDb}`);
+    }
+    log(`Decision count verified: ${totalDecisionsInDb} decisions migrated`);
+    
+    // Verify user_id is set on all records
+    const tradesWithoutUserId = db.prepare('SELECT COUNT(*) as count FROM trades WHERE user_id IS NULL').get().count;
+    if (tradesWithoutUserId > 0) {
+      throw new Error(`${tradesWithoutUserId} trades are missing user_id`);
+    }
+    
+    const positionsWithoutUserId = db.prepare('SELECT COUNT(*) as count FROM positions WHERE user_id IS NULL').get().count;
+    if (positionsWithoutUserId > 0) {
+      throw new Error(`${positionsWithoutUserId} positions are missing user_id`);
+    }
+    
+    const decisionsWithoutUserId = db.prepare('SELECT COUNT(*) as count FROM bot_decisions WHERE user_id IS NULL').get().count;
+    if (decisionsWithoutUserId > 0) {
+      throw new Error(`${decisionsWithoutUserId} decisions are missing user_id`);
+    }
+    
+    log('✓ All user_id foreign keys verified');
     log('✓ Verification passed - Migration successful!');
     
   } catch (error) {

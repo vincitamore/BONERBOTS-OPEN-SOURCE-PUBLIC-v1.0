@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useConfiguration } from '../../context/ConfigurationContext';
+import { useAuth } from '../../context/AuthContext';
 import { StatCard } from '../../components/analytics/StatCard';
 import { TimeSeriesChart } from '../../components/charts/TimeSeriesChart';
 import { BarChart } from '../../components/charts/BarChart';
@@ -33,28 +34,39 @@ interface BotPerformance {
 
 export const AnalyticsPage: React.FC = () => {
   const { bots } = useConfiguration();
+  const { token } = useAuth();
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [botPerformances, setBotPerformances] = useState<BotPerformance[]>([]);
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
 
   useEffect(() => {
-    fetchAnalytics();
-  }, [timeRange]);
+    if (token) {
+      fetchAnalytics();
+    }
+  }, [timeRange, token]);
 
   const fetchAnalytics = async () => {
+    if (!token) return;
+    
     try {
       setLoading(true);
       
       // Fetch overall performance metrics
       const metricsResponse = await axios.get(`${API_BASE_URL}/api/v2/analytics/performance`, {
-        params: { timeRange }
+        params: { timeRange },
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       // Fetch bot-specific performances
       const botPerformancesPromises = bots.map(async (bot) => {
         const response = await axios.get(`${API_BASE_URL}/api/v2/analytics/performance/${bot.id}`, {
-          params: { timeRange }
+          params: { timeRange },
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         });
         return {
           botId: bot.id,

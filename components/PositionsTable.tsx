@@ -1,6 +1,7 @@
 // components/PositionsTable.tsx
 import React from 'react';
 import { Position, OrderType, AppMode, Market } from '../types';
+import { useToast } from '../context/ToastContext';
 import { LongArrowIcon } from './icons/LongArrowIcon';
 import { ShortArrowIcon } from './icons/ShortArrowIcon';
 
@@ -12,15 +13,27 @@ interface PositionsTableProps {
 }
 
 const PositionsTable: React.FC<PositionsTableProps> = ({ positions, mode, markets, onManualClose }) => {
+  const { confirm } = useToast();
+  
   const getPnlColor = (value: number) => {
     if (value > 0) return 'text-green-400';
     if (value < 0) return 'text-red-400';
     return 'text-gray-400';
   };
   
-  const handleCloseClick = (positionId: string) => {
-    if (onManualClose && window.confirm('Are you sure you want to manually close this position?')) {
-        onManualClose(positionId);
+  const handleCloseClick = async (positionId: string) => {
+    if (!onManualClose) return;
+    
+    const confirmed = await confirm({
+      title: 'Close Position',
+      message: 'Are you sure you want to manually close this position?',
+      confirmText: 'Close Position',
+      cancelText: 'Cancel',
+      type: 'warning',
+    });
+    
+    if (confirmed) {
+      onManualClose(positionId);
     }
   };
 

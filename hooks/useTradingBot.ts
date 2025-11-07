@@ -5,10 +5,12 @@ import axios from 'axios';
 import { SerializableBotState, Market, ArenaState } from '../types';
 import { subscribeToStateChanges } from '../services/stateService';
 import { getApiBaseUrl } from '../utils/apiConfig';
+import { useToast } from '../context/ToastContext';
 
 const API_BASE_URL = getApiBaseUrl();
 
 const useTradingBots = (isGloballyPaused: boolean) => {
+    const { showToast, confirm } = useToast();
     const [bots, setBots] = useState<SerializableBotState[]>([]);
     const [markets, setMarkets] = useState<Market[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -92,9 +94,9 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             // State update will come via WebSocket
         } catch (error) {
             console.error('Failed to toggle bot pause:', error);
-            alert('Failed to toggle bot pause. Please try again.');
+            showToast('Failed to toggle bot pause. Please try again.', 'error');
         }
-    }, []);
+    }, [showToast]);
 
     /**
      * Manually close a position (via server API)
@@ -108,18 +110,18 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             });
             
             if (response.data.notes && response.data.notes.length > 0) {
-                alert(response.data.notes.join('\n'));
+                showToast(response.data.notes.join('\n'), 'info');
             } else {
-                alert('Position closed successfully');
+                showToast('Position closed successfully', 'success');
             }
             
             // State update will come via WebSocket
         } catch (error: any) {
             console.error('Failed to close position:', error);
             const message = error.response?.data?.error || 'Failed to close position. Please try again.';
-            alert(message);
+            showToast(message, 'error');
         }
-    }, []);
+    }, [showToast]);
 
     /**
      * Reset a bot (via server API)
@@ -130,24 +132,42 @@ const useTradingBots = (isGloballyPaused: boolean) => {
         const botToReset = bots.find(b => b.id === botId);
         if (botToReset && botToReset.tradingMode === 'real') {
             console.log('❌ Cannot reset real trading bot');
-            alert("Cannot reset a bot that is trading with real funds.");
+            showToast("Cannot reset a bot that is trading with real funds.", 'error');
             return;
         }
         
         console.log('Showing confirmation dialog...');
-        if (!window.confirm("Are you sure you want to reset this bot? This will clear all positions, trades, and AI logs.")) {
+        const confirmed = await confirm({
+            title: 'Reset Bot',
+            message: 'Are you sure you want to reset this bot? This will clear all positions, trades, and AI logs. Learning history will be preserved.',
+            confirmText: 'Reset',
+            cancelText: 'Cancel',
+            type: 'warning',
+        });
+
+        if (!confirmed) {
             console.log('User cancelled reset');
             return;
         }
         
-        console.log('User confirmed reset, proceeding...');
+        // Ask if they also want to clear learning history
+        const clearLearning = await confirm({
+            title: 'Clear Learning History?',
+            message: 'Do you also want to clear this bot\'s learning history? If you choose "Yes", the bot will start fresh with no accumulated knowledge. If you choose "No", it will retain its learnings.',
+            confirmText: 'Yes, Clear Learning',
+            cancelText: 'No, Keep Learning',
+            type: 'warning',
+        });
+        
+        console.log(`User confirmed reset, clearLearning=${clearLearning}`);
         
         try {
             // Call the backend API to reset the bot
-            const token = localStorage.getItem('token');
-            console.log(`Calling API: ${API_BASE_URL}/api/v2/bots/${botId}/reset`);
+            const token = localStorage.getItem('auth_token');
+            const url = `${API_BASE_URL}/api/v2/bots/${botId}/reset${clearLearning ? '?clearLearning=true' : ''}`;
+            console.log(`Calling API: ${url}`);
             
-            const response = await fetch(`${API_BASE_URL}/api/v2/bots/${botId}/reset`, {
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -166,6 +186,9 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             const result = await response.json();
             console.log(`✅ Backend reset successful:`, result);
 
+            const learningMsg = result.learning_cleared ? 'Learning history cleared.' : 'Learning history preserved.';
+            showToast(`Bot reset successful! ${learningMsg} Reloading...`, 'success');
+
             // Force a full page reload to ensure clean state
             console.log('🔄 Reloading page to refresh bot state...');
             setTimeout(() => {
@@ -174,9 +197,9 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             
         } catch (error) {
             console.error('❌ Error resetting bot:', error);
-            alert(`Failed to reset bot: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            showToast(`Failed to reset bot: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         }
-    }, [bots]);
+    }, [bots, showToast, confirm]);
 
     /**
      * Force bot to process a trading turn (via server API)
@@ -195,9 +218,100 @@ const useTradingBots = (isGloballyPaused: boolean) => {
             // State update will come via WebSocket
         } catch (error) {
             console.error('Failed to force trading turn:', error);
-            alert('Failed to force trading turn. Please try again.');
+            showToast('Failed to force trading turn. Please try again.', 'error');
         }
-    }, []);
+    }, [showToast]);
+
+    /**
+     * Force generate learning history summary for a bot (via server API)
+     */
+    const forceSummarize = useCallback(async (botId: string) => {
+        try {
+            console.log(`📚 Force summarizing history for bot ${botId}`);
+            showToast('Generating learning summary... This may take a minute.', 'info');
+            
+            const token = localStorage.getItem('auth_token');
+            const response = await axios.post(
+                `${API_BASE_URL}/api/v2/bots/${botId}/force-summarize`,
+                {},
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
+            );
+            
+            if (response.data.success) {
+                showToast(response.data.message, 'success');
+            } else {
+                showToast(response.data.message || 'Summarization was not needed', 'info');
+            }
+        } catch (error: any) {
+            console.error('Failed to force summarization:', error);
+            const message = error.response?.data?.message || 'Failed to generate learning summary. Please try again.';
+            showToast(message, 'error');
+        }
+    }, [showToast]);
+
+    /**
+     * Clear only the learning history (doesn't reset trades/positions)
+     */
+    const clearLearningHistory = useCallback(async (botId: string) => {
+        console.log(`🧠 clearLearningHistory called for: ${botId}`);
+        
+        const bot = bots.find(b => b.id === botId);
+        if (!bot) {
+            console.log('❌ Bot not found');
+            return;
+        }
+        
+        console.log('Showing confirmation dialog...');
+        const confirmed = await confirm({
+            title: 'Clear Learning History',
+            message: `Are you sure you want to clear ${bot.name}'s learning history? This will erase all accumulated knowledge and insights. Trades, positions, and balance will NOT be affected.`,
+            confirmText: 'Clear Learning',
+            cancelText: 'Cancel',
+            type: 'warning',
+        });
+
+        if (!confirmed) {
+            console.log('User cancelled learning clear');
+            return;
+        }
+        
+        console.log('User confirmed, clearing learning history...');
+        
+        try {
+            const token = localStorage.getItem('auth_token');
+            const url = `${API_BASE_URL}/api/v2/bots/${botId}/clear-learning`;
+            console.log(`Calling API: ${url}`);
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+            });
+
+            console.log('API response status:', response.status);
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('API error:', errorData);
+                throw new Error(errorData.error || 'Failed to clear learning history');
+            }
+
+            const result = await response.json();
+            console.log(`✅ Learning history cleared:`, result);
+
+            showToast('🧠 Learning history cleared! Bot will start learning fresh.', 'success');
+            
+        } catch (error) {
+            console.error('❌ Error clearing learning history:', error);
+            showToast(`Failed to clear learning history: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+        }
+    }, [bots, confirm, showToast]);
 
     return { 
         bots, 
@@ -206,7 +320,9 @@ const useTradingBots = (isGloballyPaused: boolean) => {
         manualClosePosition, 
         resetBot, 
         toggleBotPause, 
-        forceProcessTurn, 
+        forceProcessTurn,
+        forceSummarize, 
+        clearLearningHistory, 
         initialBalanceRef 
     };
 };

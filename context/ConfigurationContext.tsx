@@ -128,7 +128,7 @@ const API_BASE = `${API_BASE_URL}/api/v2`;
 // ============================================================================
 
 export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [bots, setBots] = useState<Bot[]>([]);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
@@ -137,10 +137,27 @@ export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Helper to include auth header
-  const getAuthHeaders = () => ({
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-  });
+  const getAuthHeaders = () => {
+    // Ensure token is valid (not null, 'null', 'undefined', or empty)
+    const validToken = token && token !== 'null' && token !== 'undefined' && token.trim().length > 0;
+    
+    return {
+      'Content-Type': 'application/json',
+      ...(validToken ? { 'Authorization': `Bearer ${token}` } : {}),
+    };
+  };
+
+  // Helper to handle authentication errors
+  const handleAuthError = (error: any) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid - logout and redirect
+      console.warn('Authentication token expired or invalid. Logging out...');
+      logout();
+      window.location.href = '/login';
+      throw new Error('Session expired. Please log in again.');
+    }
+    throw error;
+  };
 
   // ============================================================================
   // BOT OPERATIONS
@@ -154,18 +171,24 @@ export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({
         headers: getAuthHeaders(),
       });
       if (!response.ok) {
-        if (response.status === 401) throw new Error('Authentication required');
+        if (response.status === 401) {
+          handleAuthError({ response: { status: 401 } });
+        }
         throw new Error('Failed to fetch bots');
       }
       const data = await response.json();
       setBots(data);
     } catch (err) {
+      if (err instanceof Error && err.message === 'Session expired. Please log in again.') {
+        // Already handled by handleAuthError
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Unknown error');
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, logout]);
 
   const createBot = useCallback(async (botData: Partial<Bot>) => {
     try {
@@ -269,12 +292,18 @@ export const ConfigurationProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const resetBot = useCallback(async (botId: string) => {
     try {
+      if (!token) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
       setLoading(true);
       setError(null);
+      
       const response = await fetch(`${API_BASE}/bots/${botId}/reset`, {
         method: 'POST',
         headers: getAuthHeaders(),
       });
+      
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to reset bot');

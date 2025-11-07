@@ -7,13 +7,18 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useConfiguration, Bot } from '../../context/ConfigurationContext';
+import { useToast } from '../../context/ToastContext';
 import { TextInput } from '../../components/forms/TextInput';
 import { SelectDropdown, SelectOption } from '../../components/forms/SelectDropdown';
 import { PromptEditor } from '../../components/forms/PromptEditor';
+import { SymbolSelector } from '../../components/SymbolSelector';
+import ToolsDocumentation from '../../components/ToolsDocumentation';
+import { BOT_TEMPLATES, BotTemplate } from '../../utils/botTemplates';
 
 export const BotEditorPage: React.FC = () => {
   const { botId } = useParams<{ botId: string }>();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const { bots, providers, createBot, updateBot, loading } = useConfiguration();
 
   const isEditMode = botId !== 'new';
@@ -27,11 +32,14 @@ export const BotEditorPage: React.FC = () => {
     provider_id: '',
     trading_mode: 'paper' as 'paper' | 'real',
     avatar_image: null as string | null,
+    trading_symbols: null as string[] | null, // null means use global settings
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [showToolsModal, setShowToolsModal] = useState(false);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
   // Load existing bot data in edit mode
   useEffect(() => {
@@ -43,6 +51,8 @@ export const BotEditorPage: React.FC = () => {
         provider_id: existingBot.provider_id.toString(),
         trading_mode: existingBot.trading_mode,
         avatar_image: existingBot.avatar_image || null,
+        trading_symbols: (existingBot as any).trading_symbols ? 
+          JSON.parse((existingBot as any).trading_symbols) : null,
       });
       setAvatarPreview(existingBot.avatar_image || null);
     }
@@ -80,6 +90,17 @@ export const BotEditorPage: React.FC = () => {
   const handleClearAvatar = () => {
     setFormData({ ...formData, avatar_image: null });
     setAvatarPreview(null);
+  };
+
+  // Handle template selection
+  const handleTemplateSelect = (template: BotTemplate) => {
+    setFormData({
+      ...formData,
+      prompt: template.prompt,
+      name: formData.name || template.name, // Only set name if empty
+    });
+    setShowTemplateSelector(false);
+    showToast(`Applied template: ${template.name}`, 'success');
   };
 
   // Validation
@@ -139,6 +160,13 @@ export const BotEditorPage: React.FC = () => {
           updates.avatar_image = formData.avatar_image;
         }
         
+        // Include trading_symbols (null or JSON string)
+        if (formData.trading_symbols !== null && formData.trading_symbols.length > 0) {
+          updates.trading_symbols = JSON.stringify(formData.trading_symbols);
+        } else {
+          updates.trading_symbols = null; // Use global settings
+        }
+        
         await updateBot(botId!, updates);
       } else {
         // Build creation object, omitting null values
@@ -155,13 +183,21 @@ export const BotEditorPage: React.FC = () => {
           botData.avatar_image = formData.avatar_image;
         }
         
+        // Include trading_symbols (null or JSON string)
+        if (formData.trading_symbols !== null && formData.trading_symbols.length > 0) {
+          botData.trading_symbols = JSON.stringify(formData.trading_symbols);
+        } else {
+          botData.trading_symbols = null; // Use global settings
+        }
+        
         await createBot(botData);
       }
 
+      showToast('Bot saved successfully!', 'success');
       navigate('/config/bots');
     } catch (error) {
       console.error('Failed to save bot:', error);
-      alert(error instanceof Error ? error.message : 'Failed to save bot. Please try again.');
+      showToast(error instanceof Error ? error.message : 'Failed to save bot. Please try again.', 'error');
     } finally {
       setSaving(false);
     }
@@ -324,6 +360,58 @@ export const BotEditorPage: React.FC = () => {
           />
         </div>
 
+        {/* Trading Configuration */}
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-100 border-b border-gray-700 pb-2">
+              Trading Configuration
+            </h2>
+            <p className="text-gray-400 text-sm mt-2">
+              Customize which trading pairs this bot can trade. Leave empty to use global settings.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-300">
+                Allowed Trading Symbols
+              </label>
+              {formData.trading_symbols && formData.trading_symbols.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, trading_symbols: null })}
+                  className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Use Global Settings
+                </button>
+              )}
+            </div>
+            
+            {formData.trading_symbols === null ? (
+              <div className="bg-gray-700/50 border border-gray-600 rounded-lg p-4">
+                <p className="text-gray-300 text-sm mb-3">
+                  This bot will use the global trading symbols configured by the admin.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, trading_symbols: [] })}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  Customize Symbols for This Bot
+                </button>
+              </div>
+            ) : (
+              <SymbolSelector
+                selectedSymbols={formData.trading_symbols}
+                onChange={(symbols) => setFormData({ ...formData, trading_symbols: symbols })}
+              />
+            )}
+            <p className="text-xs text-gray-400">
+              Select which cryptocurrency pairs this bot is allowed to trade. Custom symbols override global settings.
+            </p>
+          </div>
+        </div>
+
         {/* AI Configuration */}
         <div className="space-y-4">
           <h2 className="text-xl font-semibold text-gray-100 border-b border-gray-700 pb-2">
@@ -375,6 +463,84 @@ export const BotEditorPage: React.FC = () => {
             </p>
           </div>
 
+          {/* Template & Tools Actions */}
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setShowTemplateSelector(!showTemplateSelector)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+              Use a Template
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowToolsModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              View Available Tools
+            </button>
+          </div>
+
+          {/* Template Selector */}
+          {showTemplateSelector && (
+            <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white">Choose a Template</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowTemplateSelector(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-2">
+                {BOT_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => handleTemplateSelect(template)}
+                    className="text-left p-4 bg-gray-800 hover:bg-gray-750 border border-gray-600 hover:border-indigo-500 rounded-lg transition-all"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h4 className="font-semibold text-white">{template.name}</h4>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        template.difficulty === 'beginner' ? 'bg-green-500/20 text-green-400' :
+                        template.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>
+                        {template.difficulty}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-400 mb-3">{template.description}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {template.recommendedTools.slice(0, 3).map((tool) => (
+                        <span key={tool} className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs rounded">
+                          {tool}
+                        </span>
+                      ))}
+                      {template.recommendedTools.length > 3 && (
+                        <span className="px-2 py-0.5 bg-gray-600 text-gray-300 text-xs rounded">
+                          +{template.recommendedTools.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <PromptEditor
             label="Strategy Prompt"
             value={formData.prompt}
@@ -403,6 +569,11 @@ export const BotEditorPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Tools Documentation Modal */}
+      {showToolsModal && (
+        <ToolsDocumentation onClose={() => setShowToolsModal(false)} mode="modal" />
+      )}
     </div>
   );
 };

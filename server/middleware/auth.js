@@ -119,9 +119,84 @@ function optionalAuth(req, res, next) {
   });
 }
 
+/**
+ * Require resource ownership middleware
+ * Verifies that the authenticated user owns the requested resource
+ * @param {string} resourceType - Type of resource ('bot', 'provider', 'wallet', etc.)
+ * @param {string} idParam - Request parameter name containing resource ID (default: 'id')
+ * @param {string} userIdField - Field name in resource containing user_id (default: 'user_id')
+ */
+function requireOwnership(resourceType, idParam = 'id', userIdField = 'user_id') {
+  return async (req, res, next) => {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Admins can access any resource
+    if (req.user.role === 'admin') {
+      return next();
+    }
+    
+    const resourceId = req.params[idParam];
+    if (!resourceId) {
+      return res.status(400).json({ error: `${idParam} parameter required` });
+    }
+    
+    try {
+      const Database = require('better-sqlite3');
+      const path = require('path');
+      const dbPath = path.join(__dirname, '..', '..', 'data', 'arena.db');
+      const db = new Database(dbPath, { readonly: true });
+      
+      try {
+        // Map resource types to table names
+        const tableMap = {
+          'bot': 'bots',
+          'provider': 'llm_providers',
+          'wallet': 'wallets',
+          'position': 'positions',
+          'trade': 'trades'
+        };
+        
+        const tableName = tableMap[resourceType] || resourceType;
+        
+        // Query to check ownership
+        const query = `SELECT ${userIdField} FROM ${tableName} WHERE id = ?`;
+        const resource = db.prepare(query).get(resourceId);
+        
+        if (!resource) {
+          return res.status(404).json({ error: `${resourceType} not found` });
+        }
+        
+        if (resource[userIdField] !== req.user.userId) {
+          return res.status(403).json({ 
+            error: 'Access denied',
+            message: 'You do not have permission to access this resource'
+          });
+        }
+        
+        next();
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      console.error('Error checking resource ownership:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}
+
+/**
+ * Require admin role
+ * Shorthand for requireRole('admin')
+ */
+const requireAdmin = requireRole('admin');
+
 module.exports = {
   authenticateToken,
   requireRole,
+  requireAdmin,
+  requireOwnership,
   generateToken,
   verifyToken,
   optionalAuth,

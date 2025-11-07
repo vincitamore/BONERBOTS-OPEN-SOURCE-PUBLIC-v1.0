@@ -9,6 +9,7 @@ import Modal from './Modal';
 import PositionsTable from './PositionsTable';
 import OrderHistory from './OrderHistory';
 import BotStatus from './BotStatus';
+import LearningHistory from './LearningHistory';
 import InfoPane from './InfoPane';
 import { SerializableBotState, ModalContentType } from '../types';
 
@@ -18,7 +19,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange }) => {
-  const { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause, forceProcessTurn, initialBalanceRef } = useTradingBots(isPaused);
+  const { bots, markets, isLoading, manualClosePosition, resetBot, toggleBotPause, forceProcessTurn, forceSummarize, clearLearningHistory, initialBalanceRef } = useTradingBots(isPaused);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedBot, setSelectedBot] = useState<SerializableBotState | null>(null);
@@ -41,6 +42,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
         case 'positions': return <PositionsTable positions={selectedBot.portfolio.positions} markets={markets} mode="broadcast" onManualClose={(positionId) => manualClosePosition(selectedBot.id, positionId)} />;
         case 'history': return <OrderHistory orders={selectedBot.orders} />;
         case 'log': return <BotStatus botLogs={selectedBot.botLogs} isLoading={selectedBot.isLoading} />;
+        case 'learning': return <LearningHistory botId={selectedBot.id} botName={selectedBot.name} />;
         case 'info': return <InfoPane bot={selectedBot} />;
         default: return null;
     }
@@ -115,6 +117,8 @@ const Dashboard: React.FC<DashboardProps> = ({ isPaused, onBroadcastingChange })
             onReset={() => resetBot(bot.id)}
             onTogglePause={() => toggleBotPause(bot.id)}
             onForceTurn={() => forceProcessTurn(bot.id)}
+            onForceSummarize={() => forceSummarize(bot.id)}
+            onClearLearning={() => clearLearningHistory(bot.id)}
           />
         ))}
       </div>

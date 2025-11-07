@@ -934,6 +934,42 @@ async function executeSandboxTool(toolName, parameters, marketData) {
       case 'run_simulation':
         return sandbox.runSimulation(parameters.simulationId, parameters.parameters || {});
       
+      // Celestial/Astrological tools
+      case 'moon_phase': {
+        const celestialData = require('./celestialData');
+        const date = parameters.date ? new Date(parameters.date) : new Date();
+        return celestialData.getMoonPhase(date);
+      }
+      
+      case 'planetary_positions': {
+        const celestialData = require('./celestialData');
+        const date = parameters.date ? new Date(parameters.date) : new Date();
+        return celestialData.getPlanetaryPositions(date);
+      }
+      
+      case 'mercury_retrograde': {
+        const celestialData = require('./celestialData');
+        const date = parameters.date ? new Date(parameters.date) : new Date();
+        return celestialData.isMercuryRetrograde(date);
+      }
+      
+      case 'cosmic_aspect': {
+        const celestialData = require('./celestialData');
+        if (!parameters.planet1 || !parameters.planet2) {
+          throw new Error('cosmic_aspect requires planet1 and planet2 parameters');
+        }
+        const date = parameters.date ? new Date(parameters.date) : new Date();
+        return celestialData.calculateAspect(parameters.planet1, parameters.planet2, date);
+      }
+      
+      case 'zodiac_sign': {
+        const celestialData = require('./celestialData');
+        if (!parameters.symbol) {
+          throw new Error('zodiac_sign requires symbol parameter');
+        }
+        return celestialData.getZodiacSign(parameters.symbol);
+      }
+      
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
