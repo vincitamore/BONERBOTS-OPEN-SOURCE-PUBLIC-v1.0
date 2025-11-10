@@ -6,7 +6,7 @@ A 24/7 autonomous AI trading simulation where multiple AI bots with unique perso
 
 Can a Large Language Model (LLM), when given the right personality and strategy via a prompt, consistently outperform the market? This project creates a controlled environment to answer that question through continuous, real-time trading simulations.
 
-## 🎯 Coming Soon: Multi-User Arena
+## Coming Soon: Multi-User Arena
 
 **BONERBOTS is evolving into a competitive multi-tenant platform!** We're currently implementing a major architectural upgrade to transform this from a local-only application into a hosted bot arena where users can:
 
